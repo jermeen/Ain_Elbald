@@ -108,6 +108,85 @@ In order to ensure that the Laravel community is welcoming to all, please review
 - `description`: (Text) وصف المشكلة
 - `image`: (File) صورة توضيحية
 
+
+http://127.0.0.1:8000/api/user/register   singup
+"first_name": "Abeer",
+    "last_name": "Test",
+    "email": "abeer.test@example.com",
+    "password": "password123",
+    "password_confirmation": "password123"
+
+
+
+http://127.0.0.1:8000/api/user/login      login
+"email": "abeer.test@example.com",
+    "password": "password123"
+
+
+http://127.0.0.1:8000/api/user
+Authorization:  Bearer
+
+
+http://127.0.0.1:8000/api/user/password/forgot      forgot password
+"email": "abeer.test@example.com"
+
+
+http://127.0.0.1:8000/api/user/password/verify       verifypassword
+"email": "abeer.test@example.com",
+    "code": "الرمز المحفوظ من الخطوة 4"
+
+
+http://127.0.0.1:8000/api/user/password/reset        resetpassword
+"email": "abeer.test@example.com",
+    "token": "الرمز المحفوظ من الخطوة 4",
+    "password": "newpassword456",
+   "password_confirmation": "newpassword456 
+
+   
+إنشاء بلاغ (Create Ticket) - "هنا بنجرب الـ Controller الجديد"
+الرابط: http://127.0.0.1:8000/api/reports/create
+
+الطريقة: POST
+
+الـ Headers:
+
+Authorization: Bearer [حطي الـ Token هنا]
+
+Accept: application/json
+
+الـ Body (نوعه form-data):
+
+title: كسر في خط مياه
+
+description: يوجد تسريب كبير في المنطقة الرابعة
+
+image: (اختاري ملف صورة من جهازك)
+
+الهدف: حفظ البلاغ في الداتابيز وربطه بـ User_id الخاص بيكِ.
+
+4. عرض بلاغاتي (My Tickets)
+الرابط: http://127.0.0.1:8000/api/reports/my-tickets
+
+الطريقة: GET
+
+الـ Headers:
+
+Authorization: Bearer [حطي الـ Token هنا]
+
+الهدف: هيظهرلك قائمة (Array) بكل البلاغات اللي إنتِ رفعتيها قبل كدة. خدي منها رقم الـ report_id للخطوة الجاية.
+
+5. تتبع بلاغ (Track Ticket)
+الرابط: http://127.0.0.1:8000/api/reports/track/1 (غيري رقم 1 برقم البلاغ اللي طلعلك)
+
+الطريقة: GET
+
+الـ Headers:
+
+Authorization: Bearer [حطي الـ Token هنا]
+
+الهدف: بيعرض تفاصيل البلاغ وتحديثات الحالة اللي الأدمن هيعملها مستقبلاً
+
+
 If you discover a security vulnerability within Laravel, please send an e-mail to Taylor Otwell via [taylor@laravel.com](mailto:taylor@laravel.com). All security vulnerabilities will be promptly addressed.
 
 ## License
