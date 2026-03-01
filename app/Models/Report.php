@@ -17,7 +17,7 @@ class Report extends Model
         'description',
         'report_type',
         'location_address',
-        'latitude_longitude', // العمود الموحد
+        'latitude_longitude',
         'priority_level',
         'sorted',
         'current_status',
@@ -36,36 +36,43 @@ class Report extends Model
         'sorted' => 'boolean',
         'ai_confidence_score' => 'float',
     ];
-    
+
+    /**
+     * تحديث تلقائي لتاريخ البلاغ عند الإنشاء
+     */
+    protected static function boot()
+    {
+        parent::boot();
+        static::creating(function ($model) {
+            $model->report_date = $model->report_date ?? now();
+        });
+    }
+
     // ----------------------------------------------------
     // (Relationships)
     // ----------------------------------------------------
     
-    // 1. علاقة الإبلاغ (Belongs To User)
+    // 1. التقرير ينتمي إلى مستخدم واحد أرسله
     public function user()
     {
-        // التقرير ينتمي إلى مستخدم واحد أرسله
         return $this->belongsTo(User::class, 'user_id', 'User_id');
     }
 
-    // 2. علاقة تعيين المسؤول (Belongs To Admin)
+    // 2. التقرير قد يتم فرزه من قبل مسؤول واحد
     public function admin()
     {
-        // التقرير قد يتم فرزه من قبل مسؤول واحد
         return $this->belongsTo(Admin::class, 'admin_id', 'Admin_id');
     }
     
-    // 3. علاقة تعيين المشرف (Belongs To Supervisor)
+    // 3. التقرير قد يُعيَّن لمشرف واحد للمتابعة
     public function supervisor()
     {
-        // التقرير قد يُعيَّن لمشرف واحد للمتابعة
         return $this->belongsTo(Supervisor::class, 'supervisor_id', 'supervisor_id');
     }
 
-    // 4. علاقة تحديثات الحالة (Has Many Status Updates)
+    // 4. التقرير لديه تحديثات حالة متعددة (للتتبع)
     public function statusUpdates()
     {
-        // التقرير لديه تحديثات حالة متعددة
         return $this->hasMany(ReportStatusUpdate::class, 'report_id', 'report_id');
     }
 }
