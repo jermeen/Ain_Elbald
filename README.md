@@ -59,6 +59,55 @@ In order to ensure that the Laravel community is welcoming to all, please review
 
 ## Security Vulnerabilities
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# 🛡️ Ain Elbald API Documentation
+
+هذا المشروع يوفر نظاماً لإدارة البلاغات (Reports) لمساعدة المواطنين.
+
+## 🚀 الروابط الأساسية (Endpoints)
+
+| الوظيفة | الرابط (URL) | الطريقة (Method) | المتطلبات (Headers) |
+| :--- | :--- | :--- | :--- |
+| **إنشاء بلاغ** | `/api/reports/create` | `POST` | `Bearer Token` + `multipart/form-data` |
+| **عرض بلاغاتي** | `/api/reports/my-tickets` | `GET` | `Bearer Token` |
+| **تتبع بلاغ** | `/api/reports/track/{id}` | `GET` | `Bearer Token` |
+
+## 🛠️ تعليمات للتشغيل (للمطورين)
+بعد سحب الكود (Pull)، يرجى تنفيذ الأوامر التالية بالترتيب:
+
+1. تحديث المكتبات: `composer install`
+2. تحديث قاعدة البيانات: `php artisan migrate`
+3. تفعيل رابط الصور: `php artisan storage:link`
+
+## 📸 مثال لبيانات إنشاء بلاغ (Body)
+- `title`: (Text) عنوان البلاغ
+- `description`: (Text) وصف المشكلة
+- `image`: (File) صورة توضيحية
+
 If you discover a security vulnerability within Laravel, please send an e-mail to Taylor Otwell via [taylor@laravel.com](mailto:taylor@laravel.com). All security vulnerabilities will be promptly addressed.
 
 ## License
