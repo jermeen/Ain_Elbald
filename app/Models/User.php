@@ -31,6 +31,8 @@ class User extends Authenticatable
         'admin_id', // fk
         'password',
         'photo',
+        'social_id',
+        'social_type',
     ];
 
     /**

@@ -5,6 +5,9 @@ use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\Api\AuthController; 
 use App\Http\Controllers\Api\ReportController; // تأكدي من إضافة هذا السطر
 use App\Http\Controllers\Api\UserController;
+use App\Http\Controllers\Api\SocialAuthController;
+
+
 /*
 |--------------------------------------------------------------------------
 | API Routes
@@ -50,3 +53,5 @@ Route::controller(AuthController::class)->group(function () {
     Route::post('/user/password/verify', 'verifyCode');    
     Route::post('/user/password/reset', 'resetPassword');   
 });
+
+Route::post('/user/social-login', [SocialAuthController::class, 'handleMobileSocialLogin']);
