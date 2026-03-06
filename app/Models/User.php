@@ -30,6 +30,7 @@ class User extends Authenticatable
         'verification_code',
         'admin_id', // fk
         'password',
+        'photo',
     ];
 
     /**
