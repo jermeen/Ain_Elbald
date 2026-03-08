@@ -15,7 +15,10 @@ class ReportController extends Controller
         $validator = Validator::make($request->all(), [
             'title'       => 'required|string',
             'description' => 'required|string',
-            'image'       => 'nullable|image|max:5120', // الملف المرفوع من Postman
+            'image'       => 'nullable|image|max:5120',
+            'latitude'    => 'nullable|numeric', // لاستقبال خط العرض من الخريطة
+            'longitude'   => 'nullable|numeric', // لاستقبال خط الطول من الخريطة
+            'location_address' => 'nullable|string',
         ]);
 
         if ($validator->fails()) {
@@ -31,32 +34,41 @@ class ReportController extends Controller
                 $photoUrl = asset('storage/' . $path);
             }
 
-            // إنشاء السجل مع التأكد من مطابقة الأسماء للـ Fillable عندك
+            // إنشاء البلاغ
             $report = Report::create([
                 'user_id'            => auth()->id(),      // ID اليوزر من الـ Token
                 'title'              => $request->title,
                 'description'        => $request->description,
-                'photo_url'          => $photoUrl,         // ربط الملف المرفوع بـ photo_url
+                'photo_url'          => $photoUrl,
                 'current_status'     => 'Pending',
                 'report_date'        => now(),
                 'priority_level'     => 'Medium',
                 'report_type'        => 'External',
-                'sorted'             => false,             // قيمة boolean كما في الـ Migration
-                'location_address'   => $request->location_address ?? null,
-                'latitude_longitude' => $request->latitude_longitude ?? null,
-                'ai_confidence_score'=> null,              // حقول إضافية موجودة في الـ Fillable
+                'sorted'             => false,
+                'location_address'   => $request->location_address,
+                'latitude'           => $request->latitude,  // الحقل الجديد
+                'longitude'          => $request->longitude, // الحقل الجديد
                 'admin_id'           => null,
                 'supervisor_id'      => null,
             ]);
 
+            // --- الخطوة المهمة جداً لشاشة الـ Tracking ---
+            // إضافة أول حالة للبلاغ في جدول التحديثات عشان تظهر في التايم لاين عند الفلاتر
+            $report->statusUpdates()->create([
+                'user_id'    => auth()->id(),
+                'new_status' => 'Submitted',
+                'update_type'=> 'Status Change',
+                'content'    => 'Your ticket has been successfully submitted.',
+                'timestamp'  => now(),
+            ]);
+
             return response()->json([
                 'status' => true, 
-                'message' => 'تم إنشاء البلاغ بنجاح', 
-                'data' => $report
+                'message' => 'تم إنشاء البلاغ وبدء التتبع بنجاح', 
+                'data' => $report->load('statusUpdates') // بنرجع البيانات ومعاها التتبع بتاعها
             ], 201);
 
         } catch (Exception $e) {
-            // هنا الـ Postman هيقولك بالظبط إيه اللي ناقص في الداتابيز
             return response()->json([
                 'status' => false,
                 'message' => 'حدث خطأ أثناء الحفظ في قاعدة البيانات',
@@ -75,8 +87,10 @@ class ReportController extends Controller
     // 3. تتبع بلاغ (زرار Track My Ticket)
     public function show($id) {
         try {
-            // سحب التقرير مع تحديثات الحالة المرتبطة (Status Updates)
-            $report = Report::with('statusUpdates')
+            // سحب التقرير مع تحديثات الحالة المرتبطة (Status Updates) مرتبة من الأقدم للأحدث للتايم لاين
+            $report = Report::with(['statusUpdates' => function($query) {
+                                $query->orderBy('timestamp', 'asc');
+                            }])
                             ->where('user_id', auth()->id())
                             ->findOrFail($id);
 
