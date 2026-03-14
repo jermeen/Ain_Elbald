@@ -4,20 +4,22 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Report;
+use App\Models\Supervisor;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
+use Illuminate\Support\Facades\Http;
 use Exception;
+use Illuminate\Support\Facades\Log;
 
 class ReportController extends Controller
 {
-    // 1. إنشاء بلاغ (زرار Create Ticket)
     public function store(Request $request) {
         $validator = Validator::make($request->all(), [
             'title'       => 'required|string',
             'description' => 'required|string',
-            'image'       => 'nullable|image|max:5120',
-            'latitude'    => 'nullable|numeric', // لاستقبال خط العرض من الخريطة
-            'longitude'   => 'nullable|numeric', // لاستقبال خط الطول من الخريطة
+            'image'       => 'required|image|max:5120', 
+            'latitude'    => 'nullable|numeric',
+            'longitude'   => 'nullable|numeric',
             'location_address' => 'nullable|string',
         ]);
 
@@ -27,16 +29,55 @@ class ReportController extends Controller
 
         try {
             $photoUrl = null;
+            $imageFile = $request->file('image');
+
+            // 1. حفظ الصورة في Laravel
             if ($request->hasFile('image')) {
-                // تخزين الملف في storage/app/public/reports
-                $path = $request->file('image')->store('reports', 'public');
-                // تحويل المسار لرابط كامل (Asset URL)
+                $path = $imageFile->store('reports', 'public');
                 $photoUrl = asset('storage/' . $path);
             }
 
-            // إنشاء البلاغ
+            // 2. محاولة الاتصال بنظام الـ AI   هنا لينك احمد 
+            $aiUrl = "https://freckly-sleeveless-louvenia.ngrok-free.dev/api/classify";
+            
+            $suggestedDeptName = 'general_emergency'; 
+            $confidence = 0;
+
+            try {
+                // التعديل الجوهري: إضافة asMultipart() لضمان إرسال البيانات كـ Form Data وليس JSON
+                $aiResponse = Http::timeout(30)
+                    ->asMultipart() 
+                    ->attach(
+                        'image', 
+                        fopen($imageFile->getRealPath(), 'r'), 
+                        $imageFile->getClientOriginalName()
+                    )
+                    ->post($aiUrl, [
+                        'notes' => $request->description, // إرسال الوصف تحت مسمى notes كما يتوقع Flask
+                    ]);
+
+                // تسجيل الرد في اللوج لمعرفة سبب الـ 415 إذا استمرت
+                Log::info("AI Response Body: " . $aiResponse->body());
+
+                if ($aiResponse->successful()) {
+                    $aiData = $aiResponse->json();
+                    $tempConfidence = $aiData['confidence'] ?? 0;
+                    
+                    if ($tempConfidence > 0.30) {
+                        $suggestedDeptName = $aiData['suggested_department'] ?? 'general_emergency';
+                        $confidence = $tempConfidence;
+                    }
+                }
+            } catch (Exception $aiEx) {
+                Log::error("AI Connection Failed: " . $aiEx->getMessage());
+            }
+
+            // 3. البحث عن المشرف
+            $supervisor = Supervisor::whereRaw('LOWER(department_name) LIKE ?', ['%' . strtolower($suggestedDeptName) . '%'])->first();
+
+            // 4. إنشاء البلاغ
             $report = Report::create([
-                'user_id'            => auth()->id(),      // ID اليوزر من الـ Token
+                'user_id'            => auth()->id(),
                 'title'              => $request->title,
                 'description'        => $request->description,
                 'photo_url'          => $photoUrl,
@@ -44,60 +85,58 @@ class ReportController extends Controller
                 'report_date'        => now(),
                 'priority_level'     => 'Medium',
                 'report_type'        => 'External',
-                'sorted'             => false,
+                'sorted'             => ($confidence > 0.30), 
                 'location_address'   => $request->location_address,
-                'latitude'           => $request->latitude,  // الحقل الجديد
-                'longitude'          => $request->longitude, // الحقل الجديد
-                'admin_id'           => null,
-                'supervisor_id'      => null,
+                'latitude'           => $request->latitude,
+                'longitude'          => $request->longitude,
+                'ai_confidence_score'=> $confidence,
+                'supervisor_id'      => $supervisor ? $supervisor->supervisor_id : null,
             ]);
 
-            // --- الخطوة المهمة جداً لشاشة الـ Tracking ---
-            // إضافة أول حالة للبلاغ في جدول التحديثات عشان تظهر في التايم لاين عند الفلاتر
+            // 5. تحديث التايم لاين
+            $deptNameAr = $supervisor ? $supervisor->department_name : "الطوارئ العامة (قيد الفرز)";
             $report->statusUpdates()->create([
                 'user_id'    => auth()->id(),
                 'new_status' => 'Submitted',
                 'update_type'=> 'Status Change',
-                'content'    => 'Your ticket has been successfully submitted.',
+                'content'    => "تم استلام البلاغ وتوجيهه لقسم: " . $deptNameAr,
                 'timestamp'  => now(),
             ]);
 
             return response()->json([
                 'status' => true, 
-                'message' => 'تم إنشاء البلاغ وبدء التتبع بنجاح', 
-                'data' => $report->load('statusUpdates') // بنرجع البيانات ومعاها التتبع بتاعها
+                'message' => 'تم إنشاء البلاغ بنجاح', 
+                'ai_analysis' => [
+                    'confidence' => $confidence,
+                    'department' => $suggestedDeptName
+                ],
+                'data' => $report->load('statusUpdates')
             ], 201);
 
         } catch (Exception $e) {
             return response()->json([
                 'status' => false,
-                'message' => 'حدث خطأ أثناء الحفظ في قاعدة البيانات',
+                'message' => 'خطأ في الخادم الداخلي',
                 'error' => $e->getMessage() 
             ], 500);
         }
     }
 
-    // 2. عرض بلاغاتي (زرار My Tickets)
     public function index() {
-        // ترتيب تنازلي عشان الجديد يظهر فوق
         $reports = Report::where('user_id', auth()->id())->orderBy('created_at', 'desc')->get();
         return response()->json(['status' => true, 'data' => $reports]);
     }
 
-    // 3. تتبع بلاغ (زرار Track My Ticket)
     public function show($id) {
         try {
-            // سحب التقرير مع تحديثات الحالة المرتبطة (Status Updates) مرتبة من الأقدم للأحدث للتايم لاين
             $report = Report::with(['statusUpdates' => function($query) {
                                 $query->orderBy('timestamp', 'asc');
                             }])
                             ->where('user_id', auth()->id())
                             ->findOrFail($id);
-
             return response()->json(['status' => true, 'data' => $report]);
         } catch (Exception $e) {
-            return response()->json(['status' => false, 'message' => 'البلاغ غير موجود أو لا تملك صلاحية الوصول إليه'], 404);
+            return response()->json(['status' => false, 'message' => 'البلاغ غير موجود'], 404);
         }
     }
 }
-//reportcontroller
