@@ -13,6 +13,7 @@ use Illuminate\Support\Facades\Log;
 
 class ReportController extends Controller
 {
+    // 1. إنشاء بلاغ (مع الربط بالـ AI)
     public function store(Request $request) {
         $validator = Validator::make($request->all(), [
             'title'       => 'required|string',
@@ -31,20 +32,18 @@ class ReportController extends Controller
             $photoUrl = null;
             $imageFile = $request->file('image');
 
-            // 1. حفظ الصورة في Laravel
+            // حفظ الصورة في Laravel
             if ($request->hasFile('image')) {
                 $path = $imageFile->store('reports', 'public');
                 $photoUrl = asset('storage/' . $path);
             }
 
-            // 2. محاولة الاتصال بنظام الـ AI   هنا لينك احمد 
+            // محاولة الاتصال بنظام الـ AI
             $aiUrl = "https://freckly-sleeveless-louvenia.ngrok-free.dev/api/classify";
-            
             $suggestedDeptName = 'general_emergency'; 
             $confidence = 0;
 
             try {
-                // التعديل الجوهري: إضافة asMultipart() لضمان إرسال البيانات كـ Form Data وليس JSON
                 $aiResponse = Http::timeout(30)
                     ->asMultipart() 
                     ->attach(
@@ -53,10 +52,9 @@ class ReportController extends Controller
                         $imageFile->getClientOriginalName()
                     )
                     ->post($aiUrl, [
-                        'notes' => $request->description, // إرسال الوصف تحت مسمى notes كما يتوقع Flask
+                        'notes' => $request->description,
                     ]);
 
-                // تسجيل الرد في اللوج لمعرفة سبب الـ 415 إذا استمرت
                 Log::info("AI Response Body: " . $aiResponse->body());
 
                 if ($aiResponse->successful()) {
@@ -72,10 +70,10 @@ class ReportController extends Controller
                 Log::error("AI Connection Failed: " . $aiEx->getMessage());
             }
 
-            // 3. البحث عن المشرف
+            // البحث عن المشرف
             $supervisor = Supervisor::whereRaw('LOWER(department_name) LIKE ?', ['%' . strtolower($suggestedDeptName) . '%'])->first();
 
-            // 4. إنشاء البلاغ
+            // إنشاء البلاغ
             $report = Report::create([
                 'user_id'            => auth()->id(),
                 'title'              => $request->title,
@@ -93,7 +91,7 @@ class ReportController extends Controller
                 'supervisor_id'      => $supervisor ? $supervisor->supervisor_id : null,
             ]);
 
-            // 5. تحديث التايم لاين
+            // تحديث التايم لاين
             $deptNameAr = $supervisor ? $supervisor->department_name : "الطوارئ العامة (قيد الفرز)";
             $report->statusUpdates()->create([
                 'user_id'    => auth()->id(),
@@ -122,11 +120,19 @@ class ReportController extends Controller
         }
     }
 
+    // 2. عرض بلاغاتي (My Tickets)
     public function index() {
-        $reports = Report::where('user_id', auth()->id())->orderBy('created_at', 'desc')->get();
-        return response()->json(['status' => true, 'data' => $reports]);
+        $reports = Report::where('user_id', auth()->id())
+                         ->orderBy('created_at', 'desc')
+                         ->get();
+                         
+        return response()->json([
+            'status' => true, 
+            'data' => $reports
+        ]);
     }
 
+    // 3. تتبع بلاغ (Track Ticket)
     public function show($id) {
         try {
             $report = Report::with(['statusUpdates' => function($query) {
@@ -134,9 +140,16 @@ class ReportController extends Controller
                             }])
                             ->where('user_id', auth()->id())
                             ->findOrFail($id);
-            return response()->json(['status' => true, 'data' => $report]);
+
+            return response()->json([
+                'status' => true, 
+                'data' => $report
+            ]);
         } catch (Exception $e) {
-            return response()->json(['status' => false, 'message' => 'البلاغ غير موجود'], 404);
+            return response()->json([
+                'status' => false, 
+                'message' => 'البلاغ غير موجود أو ليس لديك صلاحية الوصول إليه'
+            ], 404);
         }
     }
 }
