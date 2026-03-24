@@ -24,6 +24,8 @@ Route::post('/supervisor/login', [SupervisorAuthController::class, 'login']);
 // مسارات المصادقة للمستخدم العادي (الموبايل)
 Route::controller(AuthController::class)->group(function () {
     Route::post('/user/register', 'register');          
+    // [إضافة جديدة]: مسار تفعيل الحساب بالكود (4 أرقام) بعد التسجيل
+    Route::post('/user/verify-email', 'verifyEmail'); 
     Route::post('/user/login', 'login');           
     Route::post('/user/password/forgot', 'forgotPassword');  
     Route::post('/user/password/verify', 'verifyCode');    

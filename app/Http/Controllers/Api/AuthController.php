@@ -34,6 +34,9 @@ class AuthController extends Controller
             return response()->json(['status' => false, 'message' => 'Validation Failed', 'errors' => $e->errors()], 422);
         }
 
+        // [تعديل]: توليد كود تحقق من 4 أرقام
+        $v_code = (string) random_int(1000, 9999);
+
         $user = User::create([
             'first_name' => $request->first_name,
             'last_name' => $request->last_name,
@@ -42,17 +45,51 @@ class AuthController extends Controller
             'phone' => $request->phone,
             'location' => $request->location,
             'date_of_birth' => $request->date_of_birth,
-            'is_verified' => true, // تفعيل تلقائي
+            'is_verified' => false, // [تعديل]: الحساب غير مفعل حتى يتم إدخال الكود
+            'verification_code' => $v_code, // [تعديل]: حفظ الكود في قاعدة البيانات
         ]);
 
         $token = $user->createToken("API_TOKEN")->plainTextToken;
 
         return response()->json([
             'status' => true,
-            'message' => 'تم التسجيل بنجاح.',
+            'message' => 'تم التسجيل بنجاح. يرجى تفعيل الحساب باستخدام الكود المرسل.',
             'user' => $user->only('first_name', 'email'),
+            'verification_code' => $v_code, // [للتجربة]: نرجعه هنا عشان تشوفيه في Postman
             'token' => $token
         ], 201);
+    }
+
+    // ------------------------------------------------------------------
+    // [إضافة جديدة]: VERIFY EMAIL (تفعيل الحساب بعد التسجيل) - API: /api/user/verify-email
+    // ------------------------------------------------------------------
+    public function verifyEmail(Request $request)
+    {
+        $request->validate([
+            'email' => 'required|email',
+            'code' => 'required|string|size:4'
+        ]);
+
+        $user = User::where('email', $request->email)
+                    ->where('verification_code', $request->code)
+                    ->first();
+
+        if (!$user) {
+            return response()->json([
+                'status' => false,
+                'message' => 'كود التفعيل غير صحيح أو البريد الإلكتروني خاطئ.'
+            ], 400);
+        }
+
+        // تفعيل الحساب ومسح الكود
+        $user->is_verified = true;
+        $user->verification_code = null;
+        $user->save();
+
+        return response()->json([
+            'status' => true,
+            'message' => 'تم تفعيل الحساب بنجاح. يمكنك الآن استخدام كافة مميزات التطبيق.'
+        ], 200);
     }
 
     // ------------------------------------------------------------------
@@ -70,6 +107,16 @@ class AuthController extends Controller
         }
 
         $user = Auth::user();
+
+        // [تعديل]: منع الدخول إذا كان الحساب غير مفعل
+        if (!$user->is_verified) {
+            return response()->json([
+                'status' => false,
+                'message' => 'يرجى تفعيل حسابك أولاً. تم إرسال كود التحقق عند التسجيل.',
+                'needs_verification' => true // تلميح للفلاتر عشان يفتح شاشة الكود
+            ], 403);
+        }
+
         $token = $user->createToken("API_TOKEN")->plainTextToken;
 
         return response()->json([
@@ -114,7 +161,7 @@ class AuthController extends Controller
     }
 
     // ------------------------------------------------------------------
-    // 4. VERIFY CODE (التحقق من الكود) - API: /api/user/password/verify
+    // 4. VERIFY CODE (التحقق من الكود الخاص بكلمة السر) - API: /api/user/password/verify
     // ------------------------------------------------------------------
     public function verifyCode(Request $request)
     {
@@ -122,12 +169,10 @@ class AuthController extends Controller
         
         $resetData = DB::table('password_reset_tokens')->where('email', $request->email)->first();
 
-        // التحقق من وجود الرمز ومطابقته (باستخدام Hash::check لأنه مشفر)
         if (!$resetData || !Hash::check($request->code, $resetData->token)) {
             return response()->json(['status' => false, 'message' => 'كود التحقق غير صحيح.'], 400);
         }
         
-        // التحقق من انتهاء الصلاحية (افتراضياً 60 دقيقة)
         $expiryTime = 60 * 60; 
         if (Carbon::parse($resetData->created_at)->addSeconds($expiryTime)->isPast()) {
             DB::table('password_reset_tokens')->where('email', $request->email)->delete();
@@ -149,7 +194,6 @@ class AuthController extends Controller
 
         $resetData = DB::table('password_reset_tokens')->where('email', $request->email)->first();
 
-        // التحقق من الرمز المشفر مرة أخرى
         if (!$resetData || !Hash::check($request->token, $resetData->token)) {
             return response()->json(['status' => false, 'message' => 'رمز إعادة التعيين غير صالح.'], 400);
         }
@@ -157,7 +201,7 @@ class AuthController extends Controller
         $user = User::where('email', $request->email)->first();
         if ($user) {
             $user->forceFill(['password' => Hash::make($request->password)])->save();
-            DB::table('password_reset_tokens')->where('email', $request->email)->delete(); // حذف الرمز
+            DB::table('password_reset_tokens')->where('email', $request->email)->delete(); 
             
             return response()->json([
                 'status' => true,
