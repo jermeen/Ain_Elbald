@@ -14,13 +14,13 @@ use Illuminate\Support\Facades\Log;
 class ReportController extends Controller
 {
     /**
-     * 1. إنشاء بلاغ جديد مع ربط الـ AI وتحويل الصورة لـ Base64
+     * 1. إنشاء بلاغ جديد (الصورة اختيارية)
      */
     public function store(Request $request) {
         $validator = Validator::make($request->all(), [
             'title'       => 'required|string',
             'description' => 'required|string',
-            'image'       => 'required|image|max:5120', 
+            'image'       => 'nullable|image|max:5120', // [تعديل]: أصبحت nullable
             'latitude'    => 'nullable|numeric',
             'longitude'   => 'nullable|numeric',
             'location_address' => 'nullable|string',
@@ -34,23 +34,25 @@ class ReportController extends Controller
             $photoUrl = null;
             $imageBase64 = null;
 
+            // [تعديل]: التعامل مع الصورة فقط في حال وجودها
             if ($request->hasFile('image')) {
                 $imageFile = $request->file('image');
                 
-                // حفظ الصورة في التخزين المحلي (للعرض في التطبيق)
+                // حفظ الصورة في التخزين المحلي
                 $path = $imageFile->store('reports', 'public');
                 $photoUrl = asset('storage/' . $path);
 
-                // تحويل الصورة لـ Base64 لضمان وصولها للـ AI بدون مشاكل Ngrok
+                // تحويل الصورة لـ Base64
                 $imageBase64 = base64_encode(file_get_contents($imageFile->getRealPath()));
             }
 
             // إعدادات الـ AI
             $aiUrl = "https://Besoxjr-3in-el-balad.hf.space/api/classify";
-            $suggestedDeptName = 'general_emergency'; // القسم الافتراضي
+            $suggestedDeptName = 'general_emergency'; 
             $confidence = 0;
 
             try {
+                // إرسال الطلب للـ AI (الصورة ستكون null إذا لم ترفع)
                 $aiResponse = Http::timeout(30)->post($aiUrl, [
                     'description' => $request->description,
                     'image_base64' => $imageBase64 
@@ -60,10 +62,6 @@ class ReportController extends Controller
                     $aiData = $aiResponse->json();
                     $tempConfidence = $aiData['confidence'] ?? 0;
                     
-                    /* * [تعديل]: تم رفع حد الثقة (Threshold) إلى 0.50
-                     * إذا كانت نسبة تأكد الـ AI أقل من 50%، سيتم تجاهل التصنيف
-                     * وتحويل البلاغ لـ "الطوارئ العامة" لضمان الدقة البشرية.
-                     */
                     if ($tempConfidence >= 0.50) { 
                         $suggestedDeptName = $aiData['category'] ?? 'general_emergency';
                         $confidence = $tempConfidence;
@@ -80,27 +78,25 @@ class ReportController extends Controller
 
             // إنشاء البلاغ
             $report = Report::create([
-                'user_id'            => auth()->id(),
-                'title'              => $request->title,
-                'description'        => $request->description,
-                'photo_url'          => $photoUrl,
-                'current_status'     => 'Pending',
-                'report_date'        => now(),
-                'priority_level'     => 'Medium',
-                'report_type'        => 'External',
-                'sorted'             => ($confidence >= 0.50), // يعتبر مصنفاً فقط إذا تخطى الـ 50%
-                'location_address'   => $request->location_address,
-                'latitude'           => $request->latitude,
-                'longitude'          => $request->longitude,
+                'user_id'             => auth()->id(),
+                'title'               => $request->title,
+                'description'         => $request->description,
+                'photo_url'           => $photoUrl, // ستكون null لو لم ترفع صورة
+                'current_status'      => 'Pending',
+                'report_date'         => now(),
+                'priority_level'      => 'Medium',
+                'report_type'         => 'External',
+                'sorted'              => ($confidence >= 0.50),
+                'location_address'    => $request->location_address,
+                'latitude'            => $request->latitude,
+                'longitude'           => $request->longitude,
                 'ai_confidence_score'=> $confidence,
-                'supervisor_id'      => $supervisor ? $supervisor->supervisor_id : null,
+                'supervisor_id'       => $supervisor ? $supervisor->supervisor_id : null,
             ]);
 
             // إضافة التحديث الأول في التايم لاين
             $deptNameAr = $supervisor ? $supervisor->department_name : "الطوارئ العامة (قيد الفرز)";
             
-            /* * [تعديل]: إضافة تنبيه في الرد والتايم لاين لو كان التصنيف غير مؤكد
-             */
             $isReliable = ($confidence >= 0.50);
             $timelineNote = (!$isReliable && $confidence > 0) 
                             ? " (جاري التحقق من التصنيف من قبل المختصين)" 
@@ -132,7 +128,7 @@ class ReportController extends Controller
     }
 
     /**
-     * 2. عرض كل بلاغاتي (My Tickets)
+     * 2. عرض كل بلاغاتي (كما هي)
      */
     public function index() {
         $reports = Report::with('supervisor')
@@ -158,7 +154,7 @@ class ReportController extends Controller
     }
 
     /**
-     * 3. تتبع بلاغ محدد بالتفصيل مع التايم لاين
+     * 3. تتبع بلاغ محدد (كما هي)
      */
     public function show($id) {
         try {
