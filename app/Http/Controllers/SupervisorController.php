@@ -56,7 +56,17 @@ class SupervisorController extends Controller
         $tasks = Report::where('supervisor_id', Auth::id())
             ->whereNotNull('technician_id')
             ->with('technician:technician_id,first_name,last_name')
-            ->get();
+            ->get()
+            ->map(function ($report) {
+                return [
+                    'report_id' => $report->report_id,
+                    'technician_name' => trim($report->technician->first_name . ' ' . $report->technician->last_name),
+                    'status' => $report->current_status, // حالة البلاغ (Assigned, In Progress...)
+                    'add_comment' => $report->supervisor_comment ?? '', // الكومنت
+                    'response_time' => $report->target_hours . ' Hours', // الوقت المستهدف
+                    'priority' => $report->priority_level, // إضافة اختيارية للأهمية
+                ];
+            });
 
         return response()->json(['status' => true, 'data' => $tasks]);
     }
