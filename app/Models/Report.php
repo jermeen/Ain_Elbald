@@ -29,6 +29,10 @@ class Report extends Model
         'user_id', 
         'admin_id',
         'supervisor_id',
+        // [إضافة]: الخانات الجديدة للداشبورد
+        'technician_id',
+        'supervisor_comment',
+        'target_hours',
     ];
 
     protected $casts = [
@@ -71,7 +75,13 @@ class Report extends Model
         return $this->belongsTo(Supervisor::class, 'supervisor_id', 'supervisor_id');
     }
 
-    // 4. التقرير لديه تحديثات حالة متعددة (للتتبع)
+    // [إضافة]: 4. التقرير يُسند إلى فني واحد للعمل عليه
+    public function technician()
+    {
+        return $this->belongsTo(Technician::class, 'technician_id', 'technician_id');
+    }
+
+    // 5. التقرير لديه تحديثات حالة متعددة (للتتبع)
     public function statusUpdates()
     {
         return $this->hasMany(ReportStatusUpdate::class, 'report_id', 'report_id');
