@@ -36,18 +36,37 @@ class SupervisorController extends Controller
         return response()->json(['status' => true, 'message' => 'Technician added successfully']);
     }
 
-    // 2. عرض قائمة الفنيين (الجدول اللي فوق في السكرينة)
+    
+    // 2. عرض قائمة الفنيين (الجدول العلوي) - النسخة النهائية المفلترة
     public function getTechniciansList()
     {
-        // عرض فنيين المشرف ده بس
+        // عرض فنيين المشرف الحالي فقط
         $technicians = Technician::where('supervisor_id', Auth::id())
             ->withCount(['reports as workload' => function($query) {
+                // بنحسب فقط البلاغات اللي لسه مخلصتش (Active Tasks)
                 $query->where('current_status', '!=', 'Completed');
             }])
-            ->get();
+            ->get()
+            ->map(function ($tech) {
+                
+                // تحديد الـ Status اللي هتظهر في الفرونت إند (UI Status)
+                $uiStatus = $tech->status; 
+
+                if ($tech->status === 'Active') {
+                    // 🚨 المنطق المطلوب: لو عنده 5 بلاغات أو أكتر يبقى Busy، أقل يبقى Available
+                    $uiStatus = ($tech->workload >= 5) ? 'Busy' : 'Available';
+                }
+
+                return [
+                    'technician_name' => trim($tech->first_name . ' ' . $tech->last_name),
+                    'workload'        => $tech->workload, // الرقم اللي هيظهر في عمود الـ Workload
+                    'status'          => $uiStatus,      // الكلمة اللي هتظهر (Available / Busy)
+                ];
+            });
 
         return response()->json(['status' => true, 'data' => $technicians]);
     }
+
 
     // 3. جدول مهام الفنيين (الجدول اللي تحت خالص في السكرينة)
     public function getTechnicianTasks()
