@@ -69,25 +69,47 @@ class SupervisorController extends Controller
 
 
     // 3. جدول مهام الفنيين (الجدول اللي تحت خالص في السكرينة)
+    // 3. جدول مهام الفنيين (النسخة النهائية المختصرة)
     public function getTechnicianTasks()
     {
-        // عرض المهام اللي وزعها المشرف ده بس ومعاها بيانات الفني
-        $tasks = Report::where('supervisor_id', Auth::id())
-            ->whereNotNull('technician_id')
-            ->with('technician:technician_id,first_name,last_name')
-            ->get()
-            ->map(function ($report) {
-                return [
-                    'report_id' => $report->report_id,
-                    'technician_name' => trim($report->technician->first_name . ' ' . $report->technician->last_name),
-                    'status' => $report->current_status, // حالة البلاغ (Assigned, In Progress...)
-                    'add_comment' => $report->supervisor_comment ?? '', // الكومنت
-                    'response_time' => $report->target_hours . ' Hours', // الوقت المستهدف
-                    'priority' => $report->priority_level, // إضافة اختيارية للأهمية
-                ];
-            });
+    $tasks = Report::where('supervisor_id', Auth::id())
+        ->whereNotNull('technician_id')
+        ->with('technician:technician_id,first_name,last_name')
+        ->get()
+        ->map(function ($report) {
+            
+            $responseTime = '00:00';
 
-        return response()->json(['status' => true, 'data' => $tasks]);
+            // حساب الـ Response Time بناءً على الفرق بين التكليف والاستجابة
+            if ($report->current_status !== 'New' && $report->current_status !== 'Assigned') {
+                $startTime = Carbon::parse($report->created_at);
+                $finishTime = Carbon::parse($report->updated_at);
+                
+                $totalMinutes = $startTime->diffInMinutes($finishTime);
+                $hours = floor($totalMinutes / 60);
+                $minutes = $totalMinutes % 60;
+                
+                $responseTime = sprintf('%02dh %02dm', $hours, $minutes);
+            } else {
+                // وقت الانتظار الحالي لو لسه م بدأش
+                $startTime = Carbon::parse($report->created_at);
+                $totalMinutes = $startTime->diffInMinutes(Carbon::now());
+                $hours = floor($totalMinutes / 60);
+                $minutes = $totalMinutes % 60;
+                $responseTime = sprintf('%02dh %02dm', $hours, $minutes);
+            }
+
+            return [
+                'report_id'       => $report->report_id,
+                'technician_name' => trim($report->technician->first_name . ' ' . $report->technician->last_name),
+                'status'          => $report->current_status, 
+                'add_comment'     => $report->supervisor_comment ?? '',
+                'response_time'   => $responseTime, 
+                // تم إزالة target_hours من هنا بناءً على طلبك
+            ];
+        });
+
+    return response()->json(['status' => true, 'data' => $tasks]);
     }
 
     // 4. إضافة كومنت للفني (خانة Add Comment في الجدول)
