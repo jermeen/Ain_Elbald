@@ -68,35 +68,32 @@ class SupervisorController extends Controller
     }
 
 
-    // 3. جدول مهام الفنيين (الجدول اللي تحت خالص في السكرينة)
-    // 3. جدول مهام الفنيين (النسخة النهائية المختصرة)
+    // 3. جدول مهام الفنيين (حساب وقت الاستجابة مع عداد الانتظار)
     public function getTechnicianTasks()
     {
-    $tasks = Report::where('supervisor_id', Auth::id())
+    $tasks = Report::where('supervisor_id', \Auth::id())
         ->whereNotNull('technician_id')
         ->with('technician:technician_id,first_name,last_name')
         ->get()
         ->map(function ($report) {
             
-            $responseTime = '00:00';
+            // وقت التكليف (لما السوبرفايزر بعت البلاغ)
+            $assignedTime = \Carbon\Carbon::parse($report->created_at); 
+            $responseTime = '00h 00m';
 
-            // حساب الـ Response Time بناءً على الفرق بين التكليف والاستجابة
-            if ($report->current_status !== 'New' && $report->current_status !== 'Assigned') {
-                $startTime = Carbon::parse($report->created_at);
-                $finishTime = Carbon::parse($report->updated_at);
-                
-                $totalMinutes = $startTime->diffInMinutes($finishTime);
-                $hours = floor($totalMinutes / 60);
-                $minutes = $totalMinutes % 60;
-                
-                $responseTime = sprintf('%02dh %02dm', $hours, $minutes);
-            } else {
-                // وقت الانتظار الحالي لو لسه م بدأش
-                $startTime = Carbon::parse($report->created_at);
-                $totalMinutes = $startTime->diffInMinutes(Carbon::now());
-                $hours = floor($totalMinutes / 60);
-                $minutes = $totalMinutes % 60;
-                $responseTime = sprintf('%02dh %02dm', $hours, $minutes);
+            // الحالة 1: الفني لسه م بدأش (Assigned) -> العداد شغال "Waiting"
+            if ($report->current_status === 'Assigned') {
+                $now = \Carbon\Carbon::now();
+                $diff = $assignedTime->diff($now);
+                $totalHours = ($diff->days * 24) + $diff->h;
+                $responseTime = sprintf('%02dh %02dm (Waiting)', $totalHours, $diff->i);
+            } 
+            // الحالة 2: الفني بدأ فعلاً أو خلص -> وقت الاستجابة ثابت
+            else if (in_array($report->current_status, ['In Progress', 'Completed'])) {
+                $startTime = \Carbon\Carbon::parse($report->updated_at); 
+                $diff = $assignedTime->diff($startTime);
+                $totalHours = ($diff->days * 24) + $diff->h;
+                $responseTime = sprintf('%02dh %02dm', $totalHours, $diff->i);
             }
 
             return [
@@ -104,14 +101,14 @@ class SupervisorController extends Controller
                 'technician_name' => trim($report->technician->first_name . ' ' . $report->technician->last_name),
                 'status'          => $report->current_status, 
                 'add_comment'     => $report->supervisor_comment ?? '',
-                'response_time'   => $responseTime, 
-                // تم إزالة target_hours من هنا بناءً على طلبك
+                'response_time'   => $responseTime,
             ];
         });
 
     return response()->json(['status' => true, 'data' => $tasks]);
     }
 
+    
     // 4. إضافة كومنت للفني (خانة Add Comment في الجدول)
     public function addComment(Request $request, $report_id)
     {
