@@ -69,12 +69,24 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::middleware('is_supervisor')->group(function () {
         Route::post('/supervisor/logout', [SupervisorAuthController::class, 'logout']);
         
-        // ⬇️ المسارات الجديدة الخاصة بالسكيرنات (إضافة فني وجدول المهام) ⬇️
+        // ⬇️ المسارات الجديدة الخاصة بالسكيرنات (إضافة فني وجدول المهام والإحصائيات) ⬇️
         Route::prefix('supervisor')->group(function () {
             Route::post('/add-technician', [SupervisorController::class, 'addTechnician']);
             Route::get('/technicians-list', [SupervisorController::class, 'getTechniciansList']);
             Route::get('/technician-tasks', [SupervisorController::class, 'getTechnicianTasks']);
             Route::post('/add-comment/{report_id}', [SupervisorController::class, 'addComment']);
+            
+            // المسار الجديد لإحصائيات الداشبورد (الهوم)
+            Route::get('/dashboard-stats', [SupervisorController::class, 'getHomeDashboardStats']);
+            Route::get('/all-reports', [SupervisorController::class, 'getAllReports']);
+            // جلب بيانات الـ Popup (تحتاج رقم البلاغ)
+            Route::get('/assign-data/{report_id}', [SupervisorController::class, 'getAssignPageData']);
+            // تنفيذ الإرسال (Confirm)
+            Route::post('/confirm-assign', [SupervisorController::class, 'confirmAssign']);
+            // رفض المشكله 
+            Route::post('/reject-report', [SupervisorController::class, 'rejectReport']);
+            // معلومات البلاغ للقراءه فقط 
+            Route::get('/report-details/{report_id}', [SupervisorController::class, 'getReportDetails']);
         });
     });
 
