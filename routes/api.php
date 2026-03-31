@@ -91,6 +91,10 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::get('/pending-reports', [SupervisorController::class, 'getPendingReports']);
             // خليه كدة (عشان يبقى الـ URL هو /api/supervisor/notifications):
             Route::get('/notifications', [SupervisorController::class, 'getNotifications']);
+            // بروفايل السوبر فايز
+            Route::get('/profile', [SupervisorController::class, 'getProfile']);
+            Route::post('/profile/update', [SupervisorController::class, 'updateProfileName']);
+
         });
     });
 

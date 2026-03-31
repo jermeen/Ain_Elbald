@@ -457,30 +457,84 @@ class SupervisorController extends Controller
         ]);
     }
 
-    // 12 --- NOTIFICATION: دالة جلب الإشعارات للسوبرفايزر (للعرض في صفحة الإشعارات) ---
+    // 12 --- NOTIFICATION: دالة جلب الإشعارات للسوبرفايزر (مطابقة للتصميم 100%) ---
     public function getNotifications()
     {
         $user = Auth::user();
 
-        // جلب الإشعارات من الداتابيز وترتيبها بالأحدث
+        // جلب الإشعارات وترتيبها بالأحدث
         $notifications = $user->notifications->map(function ($n) {
             return [
-                'id'         => $n->id,
-                'title'      => $n->data['title'] ?? 'Notification',
-                'report_id'  => '#' . ($n->data['report_id'] ?? ''),
-                'message'    => $n->data['message'] ?? '',
-                'status'     => $n->data['status'] ?? 'New',
-                'photo'      => ($n->data['photo'] ?? null) ? url($n->data['photo']) : null,
-                'time_ago'   => $n->created_at->diffForHumans(),
-                'date'       => $n->created_at->format('d M'),
-                'is_read'    => $n->read_at !== null
+                // [العنوان]: هيظهر فيه اسم الجهة (مثل: مياه الشرب والصرف الصحي)
+                'title'       => $n->data['title'] ?? 'General Issue', 
+                
+                // [ID البلاغ]: هيظهر تحت العنوان مباشرة (#12345)
+                'report_id'   => isset($n->data['report_id']) ? '#' . $n->data['report_id'] : '', 
+                
+                // [الوصف]: هنا هيظهر وصف المشكلة اللي كتبه اليوزر بالظبط
+                'description' => $n->data['description'] ?? '', 
+                
+                // [الحالة]: (New, Fixed, On hold) عشان تلون في التصميم
+                'status'      => $n->data['status'] ?? 'New', 
+                
+                // [الصورة]: رابط الصورة لو موجودة
+                'photo'       => ($n->data['photo'] ?? null) ? url($n->data['photo']) : null,
+                
+                // [التوقيت]: بصيغة مقروءة (1h, 4h ago)
+                'time_ago'    => $n->created_at->diffForHumans(), 
+                
+                // [التاريخ]: بصيغة (23 Nov) للتقسيم الزمني
+                'date'        => $n->created_at->format('d M'), 
+                
+                'is_read'     => $n->read_at !== null
             ];
         });
 
         return response()->json([
             'status' => true, 
-            'data' => $notifications
+            'data'   => $notifications
         ]);
+    }
+
+    // بنجيب بيانات السوبرفايزر الحالي
+    public function getProfile()
+    {
+   
+    $supervisor = Auth::user(); 
+
+    return response()->json([
+        'status' => true,
+        'data' => [
+            // دمج الاسم الأول والأخير عشان يظهروا جمب بعض
+            'full_name'       => $supervisor->first_name . ' ' . $supervisor->last_name, 
+            'role'            => 'Supervisor',
+        ]
+    ]);
+    }
+
+    //بنحدث بيانات السوبرفايزر الحالي
+    public function updateProfileName(Request $request)
+    {
+    $supervisor = Auth::user();
+
+    $request->validate([
+        'first_name' => 'required|string|max:255',
+        'last_name'  => 'required|string|max:255',
+    ]);
+
+    // تحديث الحقلين منفصلين في قاعدة البيانات
+    $supervisor->update([
+        'first_name' => $request->first_name,
+        'last_name'  => $request->last_name,
+    ]);
+
+    return response()->json([
+        'status'  => true,
+        'message' => 'Profile updated successfully',
+        'data'    => [
+            'full_name' => $supervisor->first_name . ' ' . $supervisor->last_name
+        ]
+    ]);
     }
 
 }

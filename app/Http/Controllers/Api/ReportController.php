@@ -102,21 +102,28 @@ class ReportController extends Controller
             ]);
 
             // ========================================================================
-            // START: [إضافة الإشعار للسوبرفايزر الجديد]
+            // START: [إضافة الإشعار للسوبرفايزر الجديد - معدل ليطابق التصميم]
             // ========================================================================
             if ($supervisor) {
                 $supervisor->notify(new GeneralNotification([
-                    'title'     => 'New Report Submitted',
-                    'message'   => 'A new report #' . $report->report_id . ' has been assigned to your department (' . $deptNameAr . ').',
-                    'report_id' => $report->report_id,
-                    'status'    => 'New',
-                    'photo'     => $report->photo_url,
+                    // 1. العنوان هيكون اسم الجهة (مثلاً: مياه الشرب والصرف الصحي)
+                    'title'       => $deptNameAr, 
+                    
+                    // 2. ده الرسالة الكاملة (ممكن تسيبيها لو حبيتي تستخدميها في مكان تاني)
+                    'message'     => 'A new report #' . $report->report_id . ' has been assigned to your department.',
+                    
+                    // 3. [مهم]: وصف البلاغ اللي اليوزر كتبه عشان يظهر تحت العنوان
+                    'description' => $request->description, 
+                    
+                    'report_id'   => $report->report_id,
+                    'status'      => 'New',
+                    'photo'       => $report->photo_url,
                 ]));
             }
             // ========================================================================
             // END: [إضافة الإشعار]
             // ========================================================================
-
+            
             return response()->json([
                 'status'  => true,
                 'message' => 'تم إنشاء البلاغ وتصنيفه بنجاح',
