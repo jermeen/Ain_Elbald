@@ -87,6 +87,10 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::post('/reject-report', [SupervisorController::class, 'rejectReport']);
             // معلومات البلاغ للقراءه فقط 
             Route::get('/report-details/{report_id}', [SupervisorController::class, 'getReportDetails']);
+            //pending-reports صفحه ال 
+            Route::get('/pending-reports', [SupervisorController::class, 'getPendingReports']);
+            // خليه كدة (عشان يبقى الـ URL هو /api/supervisor/notifications):
+            Route::get('/notifications', [SupervisorController::class, 'getNotifications']);
         });
     });
 

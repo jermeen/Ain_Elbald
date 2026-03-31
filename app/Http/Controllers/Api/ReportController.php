@@ -10,6 +10,7 @@ use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\Http;
 use Exception;
 use Illuminate\Support\Facades\Log;
+use App\Notifications\GeneralNotification; // [إضافة]: استدعاء كلاس الإشعارات
 
 class ReportController extends Controller
 {
@@ -20,7 +21,7 @@ class ReportController extends Controller
         $validator = Validator::make($request->all(), [
             'title'       => 'required|string',
             'description' => 'required|string',
-            'image'       => 'nullable|image|max:5120', // [تعديل]: أصبحت nullable
+            'image'       => 'nullable|image|max:5120', 
             'latitude'    => 'nullable|numeric',
             'longitude'   => 'nullable|numeric',
             'location_address' => 'nullable|string',
@@ -34,25 +35,18 @@ class ReportController extends Controller
             $photoUrl = null;
             $imageBase64 = null;
 
-            // [تعديل]: التعامل مع الصورة فقط في حال وجودها
             if ($request->hasFile('image')) {
                 $imageFile = $request->file('image');
-                
-                // حفظ الصورة في التخزين المحلي
                 $path = $imageFile->store('reports', 'public');
                 $photoUrl = asset('storage/' . $path);
-
-                // تحويل الصورة لـ Base64
                 $imageBase64 = base64_encode(file_get_contents($imageFile->getRealPath()));
             }
 
-            // إعدادات الـ AI
             $aiUrl = "https://Besoxjr-3in-el-balad.hf.space/api/classify";
             $suggestedDeptName = 'general_emergency'; 
             $confidence = 0;
 
             try {
-                // إرسال الطلب للـ AI (الصورة ستكون null إذا لم ترفع)
                 $aiResponse = Http::timeout(30)->post($aiUrl, [
                     'description' => $request->description,
                     'image_base64' => $imageBase64 
@@ -73,15 +67,13 @@ class ReportController extends Controller
                 Log::error("AI System Failure: " . $aiEx->getMessage());
             }
 
-            // البحث عن المشرف بناءً على القسم المختار
             $supervisor = Supervisor::whereRaw('LOWER(department_name) LIKE ?', ['%' . strtolower($suggestedDeptName) . '%'])->first();
 
-            // إنشاء البلاغ
             $report = Report::create([
                 'user_id'             => auth()->id(),
                 'title'               => $request->title,
                 'description'         => $request->description,
-                'photo_url'           => $photoUrl, // ستكون null لو لم ترفع صورة
+                'photo_url'           => $photoUrl,
                 'current_status'      => 'Pending',
                 'report_date'         => now(),
                 'priority_level'      => 'Medium',
@@ -94,7 +86,6 @@ class ReportController extends Controller
                 'supervisor_id'       => $supervisor ? $supervisor->supervisor_id : null,
             ]);
 
-            // إضافة التحديث الأول في التايم لاين
             $deptNameAr = $supervisor ? $supervisor->department_name : "الطوارئ العامة (قيد الفرز)";
             
             $isReliable = ($confidence >= 0.50);
@@ -109,6 +100,22 @@ class ReportController extends Controller
                 'content'    => "تم استلام البلاغ وتوجيهه لقسم: " . $deptNameAr . $timelineNote,
                 'timestamp'  => now(),
             ]);
+
+            // ========================================================================
+            // START: [إضافة الإشعار للسوبرفايزر الجديد]
+            // ========================================================================
+            if ($supervisor) {
+                $supervisor->notify(new GeneralNotification([
+                    'title'     => 'New Report Submitted',
+                    'message'   => 'A new report #' . $report->report_id . ' has been assigned to your department (' . $deptNameAr . ').',
+                    'report_id' => $report->report_id,
+                    'status'    => 'New',
+                    'photo'     => $report->photo_url,
+                ]));
+            }
+            // ========================================================================
+            // END: [إضافة الإشعار]
+            // ========================================================================
 
             return response()->json([
                 'status'  => true,
@@ -128,7 +135,7 @@ class ReportController extends Controller
     }
 
     /**
-     * 2. عرض كل بلاغاتي (كما هي)
+     * 2. عرض كل بلاغاتي
      */
     public function index() {
         $reports = Report::with('supervisor')
@@ -154,7 +161,7 @@ class ReportController extends Controller
     }
 
     /**
-     * 3. تتبع بلاغ محدد (كما هي)
+     * 3. تتبع بلاغ محدد
      */
     public function show($id) {
         try {

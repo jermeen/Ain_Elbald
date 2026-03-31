@@ -9,6 +9,7 @@ use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Carbon\Carbon;
+use App\Notifications\GeneralNotification; // استدعاء ملف الإشعارات
 
 class SupervisorController extends Controller
 {
@@ -293,40 +294,73 @@ class SupervisorController extends Controller
         ]);
     }
 
-    // 8. تنفيذ عملية التكليف (Confirm Assign) - مع قيود الـ SLA
+    // 8. تنفيذ عملية التكليف (Confirm Assign) 
     public function confirmAssign(Request $request)
     {
         $request->validate([
-            'report_id'     => 'required|exists:reports,report_id',
-            'technician_id' => 'required|exists:technicians,technician_id',
-            'target_hours'  => 'required|integer|min:1',
-            'priority_level'=> 'required|in:Low,Medium,High',
+            'report_id'      => 'required|exists:reports,report_id',
+            'technician_id'  => 'required|exists:technicians,technician_id',
+            'target_hours'   => 'required|integer|min:1',
+            'priority_level' => 'required|in:Low,Medium,High',
         ]);
         
-        // 1. القيد الخاص بـ High (أقصى حاجة 4 ساعات)
         if ($request->priority_level === 'High' && $request->target_hours > 4) {
             return response()->json(['status' => false, 'message' => 'For High priority, SLA cannot exceed 4 hours'], 422);
         }
 
-        // 2. القيد الخاص بـ Medium (أقصى حاجة 7 ساعات)
         if ($request->priority_level === 'Medium' && $request->target_hours > 7) {
             return response()->json(['status' => false, 'message' => 'For Medium priority, SLA cannot exceed 7 hours'], 422);
         }
 
-        // 3. القيد الخاص بـ Low (أقصى حاجة 48 ساعة)
         if ($request->priority_level === 'Low' && $request->target_hours > 48) {
             return response()->json(['status' => false, 'message' => 'For Low priority, SLA cannot exceed 48 hours'], 422);
         }
 
-        // لو كل الشروط تمام.. نحدث الداتابيز
         $report = Report::findOrFail($request->report_id);
         $report->update([
             'technician_id'  => $request->technician_id,
             'target_hours'   => $request->target_hours,
             'priority_level' => $request->priority_level,
-            'current_status' => 'Assigned', // تظهر في الـ UI كـ Pending
+            'current_status' => 'Assigned',
             'assigned_at'    => now(),
         ]);
+
+        // ========================================================================
+        // START: [إضافة التحديث في التايم لاين ليظهر في سكرينة الـ Tracking]
+        // ========================================================================
+        $report->statusUpdates()->create([
+            'user_id'     => auth()->id(), 
+            'new_status'  => 'Technician Assigned', // نفس مسمى الحالة في الصورة (Step 3)
+            'update_type' => 'Status Change',
+            'content'     => 'تم مراجعة البلاغ وتكليف فني مختص للتوجه للموقع.',
+            'timestamp'   => now(),
+        ]);
+        // ========================================================================
+
+        // --- NOTIFICATION: إرسال إشعار للفني عند تكليفه بمهمة ---
+        if ($report->technician) {
+            $report->technician->notify(new GeneralNotification([
+                'title'     => 'New Task Assigned',
+                'message'   => 'You have been assigned to report #' . $report->report_id,
+                'report_id' => $report->report_id,
+                'status'    => 'Assigned',
+                'photo'     => $report->photo_url,
+            ]));
+        }
+
+        // ========================================================================
+        // START: [إرسال إشعار للمواطن (User) ليعرف أن الفني تم تعيينه]
+        // ========================================================================
+        if ($report->user) {
+            $report->user->notify(new GeneralNotification([
+                'title'     => 'Technician Assigned',
+                'message'   => 'A technician has been assigned and will handle your issue soon.',
+                'report_id' => $report->report_id,
+                'status'    => 'Assigned',
+                'photo'     => $report->photo_url,
+            ]));
+        }
+        // ========================================================================
 
         return response()->json([
             'status' => true, 
@@ -335,21 +369,29 @@ class SupervisorController extends Controller
     }
 
     // 9. رفض البلاغ (Reject Report)
-    // ملاحظة: الحالة في الداتابيز Canceled ولكنها تظهر في الـ UI باسم Rejected
     public function rejectReport(Request $request)
     {
-        // التأكد إن الـ report_id مبعوث وصح
         $request->validate([
             'report_id' => 'required|exists:reports,report_id',
         ]);
 
-        // البحث عن البلاغ
         $report = Report::findOrFail($request->report_id);
         
-        // تحديث الحالة لـ Canceled (بناءً على الـ Enum اللي عندك)
+        // تحديث الحالة لـ Canceled (تظهر في الـ UI كـ Rejected)
         $report->update([
             'current_status' => 'Canceled',
         ]);
+
+        // --- NOTIFICATION: إرسال إشعار للمواطن (User) عند رفض بلاغه ---
+        if ($report->user) {
+            $report->user->notify(new \App\Notifications\GeneralNotification([
+                'title'     => 'Report Rejected',
+                'message'   => 'Sorry, your report #' . $report->report_id . ' has been rejected by the supervisor.',
+                'report_id' => $report->report_id,
+                'status'    => 'Rejected',
+                'photo'     => $report->photo_url,
+            ]));
+        }
 
         return response()->json([
             'status' => true,
@@ -383,6 +425,61 @@ class SupervisorController extends Controller
                 ],
                 'submitted_at' => $report->created_at ? $report->created_at->format('d M Y - h:i A') : 'N/A',
             ]
+        ]);
+    }
+
+    // 11. صفحة البلاغات المعلقة (Pending Reports Page)
+   public function getPendingReports()
+    {
+        $supervisorId = Auth::id();
+
+        $reports = Report::with(['technician', 'supervisor'])
+            ->where('supervisor_id', $supervisorId)
+            ->where('current_status', 'Assigned') 
+            ->orderBy('updated_at', 'DESC') 
+            ->get()
+            ->map(function ($report) {
+                return [
+                    'id'            => '#' . $report->report_id,
+                    'issue'         => $report->supervisor->department_name ?? 'General', 
+                    // رسالة واضحة لو اللوكيشن مش موجود
+                    'location'      => $report->location_address ?: 'User did not provide a location',
+                    // --- التعديل هنا: دمج الاسم الأول والأخير للفني ---
+                    'assigned_to'   => trim(($report->technician->first_name ?? '') . ' ' . ($report->technician->last_name ?? '')) ?: 'Not Assigned', 
+                    'assigned_date' => $report->updated_at ? $report->updated_at->format('d M Y') : 'N/A',
+                    'sla'           => ($report->target_hours ?? 0) . ' h', 
+                ];
+            });
+
+        return response()->json([
+            'status' => true,
+            'data' => $reports
+        ]);
+    }
+
+    // 12 --- NOTIFICATION: دالة جلب الإشعارات للسوبرفايزر (للعرض في صفحة الإشعارات) ---
+    public function getNotifications()
+    {
+        $user = Auth::user();
+
+        // جلب الإشعارات من الداتابيز وترتيبها بالأحدث
+        $notifications = $user->notifications->map(function ($n) {
+            return [
+                'id'         => $n->id,
+                'title'      => $n->data['title'] ?? 'Notification',
+                'report_id'  => '#' . ($n->data['report_id'] ?? ''),
+                'message'    => $n->data['message'] ?? '',
+                'status'     => $n->data['status'] ?? 'New',
+                'photo'      => ($n->data['photo'] ?? null) ? url($n->data['photo']) : null,
+                'time_ago'   => $n->created_at->diffForHumans(),
+                'date'       => $n->created_at->format('d M'),
+                'is_read'    => $n->read_at !== null
+            ];
+        });
+
+        return response()->json([
+            'status' => true, 
+            'data' => $notifications
         ]);
     }
 
