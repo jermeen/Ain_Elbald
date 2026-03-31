@@ -496,7 +496,7 @@ class SupervisorController extends Controller
         ]);
     }
 
-    // بنجيب بيانات السوبرفايزر الحالي
+    // 13 بنجيب بيانات السوبرفايزر الحالي
     public function getProfile()
     {
    
@@ -512,7 +512,7 @@ class SupervisorController extends Controller
     ]);
     }
 
-    //بنحدث بيانات السوبرفايزر الحالي
+    // 14 بنحدث بيانات السوبرفايزر الحالي
     public function updateProfileName(Request $request)
     {
     $supervisor = Auth::user();

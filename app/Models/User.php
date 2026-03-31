@@ -25,7 +25,7 @@ class User extends Authenticatable
         'email',
         'phone',
         'location',
-        'Date_Of_Birth',
+        'date_of_birth',
         'is_verified',
         'verification_code',
         'admin_id', // fk
