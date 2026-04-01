@@ -123,7 +123,7 @@ class ReportController extends Controller
             // ========================================================================
             // END: [إضافة الإشعار]
             // ========================================================================
-            
+
             return response()->json([
                 'status'  => true,
                 'message' => 'تم إنشاء البلاغ وتصنيفه بنجاح',
@@ -170,30 +170,50 @@ class ReportController extends Controller
     /**
      * 3. تتبع بلاغ محدد
      */
-    public function show($id) {
-        try {
-            $report = Report::with(['statusUpdates' => function($query) { 
+   public function show($id) {
+    try {
+        $report = Report::with(['statusUpdates' => function($query) { 
                                 $query->orderBy('timestamp', 'asc'); 
                             }])
                             ->where('user_id', auth()->id())
                             ->findOrFail($id);
 
-            return response()->json([
-                'status' => true, 
-                'data'   => [
-                    'details'  => $report->makeHidden(['statusUpdates']),
-                    'timeline' => $report->statusUpdates->map(function($update) {
-                        return [
-                            'status'  => $update->new_status,
-                            'info'    => $update->content,
-                            'time'    => $update->timestamp->format('H:i A'),
-                            'date'    => $update->timestamp->format('Y-m-d')
-                        ];
-                    })
-                ]
-            ]);
+        // 1. تحويل الـ statusUpdates لمجموعة (Collection) عشان نعدل عليها
+        $updates = $report->statusUpdates;
+
+        // 2. تجهيز الـ Timeline الأساسي
+        $timeline = $updates->map(function($update) {
+            return [
+                'status' => $update->new_status,
+                'info'   => $update->content,
+                'time'   => $update->timestamp->format('H:i A'),
+                'date'   => $update->timestamp->format('Y-m-d')
+            ];
+        })->toArray();
+
+        // 3. [الإضافة المطلوبة]: حقن حالة Under Review بعد الـ Submitted مباشرة
+        // نفترض أن أول حالة دائماً هي Submitted
+        if (count($timeline) > 0) {
+            $underReview = [
+                'status' => 'Under Review',
+                'info'   => 'Our team is reviewing the details of your ticket.',
+                'time'   => $report->created_at->addMinutes(2)->format('H:i A'), // وقت تقديري بعد التقديم بدقيقتين
+                'date'   => $report->created_at->format('Y-m-d')
+            ];
+            
+            // وضعها في المركز الثاني (Index 1) في المصفوفة
+            array_splice($timeline, 1, 0, [$underReview]);
+        }
+
+        return response()->json([
+            'status' => true, 
+            'data'   => [
+                'details'  => $report->makeHidden(['statusUpdates']),
+                'timeline' => $timeline
+            ]
+        ]);
         } catch (Exception $e) {
-            return response()->json(['status' => false, 'message' => 'البلاغ غير موجود'], 404);
+        return response()->json(['status' => false, 'message' => 'البلاغ غير موجود'], 404);
         }
     }
 }
