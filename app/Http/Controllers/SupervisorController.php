@@ -40,14 +40,67 @@ class SupervisorController extends Controller
         return response()->json(['status' => true, 'message' => 'Technician added successfully']);
     }
 
-    // 2. عرض قائمة الفنيين
-    public function getTechniciansList()
+    
+    // 2. عرض قائمة الفنيين مع إضافة الفلتر (Workload, Address, Status, etc.)
+    public function getTechniciansList(Request $request) // <-- تم إضافة Request هنا لاستقبال بيانات الفلتر
     {
-        $technicians = \App\Models\Technician::where('supervisor_id', \Auth::id())
+        $query = \App\Models\Technician::where('supervisor_id', \Auth::id())
             ->withCount(['reports as workload' => function($query) {
                 $query->where('current_status', '!=', 'Completed');
-            }])
-            ->get()
+            }]);
+
+        // =========================================================
+        // START: [إضافة فلتر الفنيين بناءً على التصميم]
+        // =========================================================
+
+        // 1. فلتر اسم الفني (Technician Name)
+        if ($request->filled('technician_name')) {
+            $query->where(DB::raw("CONCAT(first_name, ' ', last_name)"), 'LIKE', '%' . $request->technician_name . '%');
+        }
+
+        // 2. فلتر العنوان/المنطقة (Address)
+        if ($request->filled('address')) {
+            $query->where('address', 'LIKE', '%' . $request->address . '%');
+        }
+
+        // 3. فلتر ضغط العمل (Workload)
+        if ($request->filled('workload')) {
+            if ($request->workload === '0 Tasks') {
+                $query->has('reports', '=', 0);
+            } elseif ($request->workload === '1-3 Tasks') {
+                $query->has('reports', '>=', 1)->has('reports', '<=', 3);
+            } elseif ($request->workload === '+3 Tasks') {
+                $query->has('reports', '>', 3);
+            }
+        }
+
+        // 4. فلتر الحالة (Status) - بنشوف الفنيين اللي عندهم بلاغات بالحالات دي
+        if ($request->has('statuses') && is_array($request->statuses) && !in_array('All', $request->statuses)) {
+            $query->whereHas('reports', function($q) use ($request) {
+                $dbStatuses = [];
+                foreach($request->statuses as $s) {
+                    if($s == 'New') $dbStatuses[] = 'Pending';
+                    if($s == 'Pending') $dbStatuses[] = 'Assigned';
+                    if($s == 'In progress') $dbStatuses[] = 'In Progress';
+                    if($s == 'Fixed') $dbStatuses[] = 'Completed';
+                    if($s == 'Late') $dbStatuses[] = 'Assigned'; // الـ Late هو Assigned بس عدى الوقت
+                }
+                $q->whereIn('current_status', $dbStatuses);
+                
+                // تعامل خاص مع حالة Late
+                if (in_array('Late', $request->statuses)) {
+                    $q->orWhere(function($sub) {
+                        $sub->where('current_status', 'Assigned')
+                            ->whereRaw('TIMESTAMPDIFF(HOUR, created_at, NOW()) > target_hours');
+                    });
+                }
+            });
+        }
+        // =========================================================
+        // END: [إضافة فلتر الفنيين]
+        // =========================================================
+
+        $technicians = $query->get()
             ->map(function ($tech) {
                 
                 $uiStatus = $tech->status; 
@@ -67,20 +120,30 @@ class SupervisorController extends Controller
         return response()->json(['status' => true, 'data' => $technicians]);
     }
 
-    // 3. جدول مهام الفنيين (حساب وقت الاستجابة مع عداد الانتظار)
-    public function getTechnicianTasks()
+    // 3. جدول مهام الفنيين (حساب وقت الاستجابة مع عداد الانتظار) مع إضافة الفلتر
+    public function getTechnicianTasks(Request $request)
     {
+        $now = \Carbon\Carbon::now(); // عرفنا الوقت الحالي بره عشان نستخدمه في الحسابات
+
         $tasks = Report::where('supervisor_id', \Auth::id())
             ->whereNotNull('technician_id')
+
+            // =========================================================
+            // START: [فلترة المهام حسب الفني المختار من الداتا بيز]
+            // =========================================================
+            ->when($request->technician_id, function ($query, $techId) {
+                return $query->where('technician_id', $techId);
+            })
+            // =========================================================
+
             ->with('technician:technician_id,first_name,last_name')
             ->get()
-            ->map(function ($report) {
+            ->map(function ($report) use ($now) {
                 
                 $assignedTime = \Carbon\Carbon::parse($report->created_at); 
                 $responseTime = '00h 00m';
 
                 if ($report->current_status === 'Assigned') {
-                    $now = \Carbon\Carbon::now();
                     $diff = $assignedTime->diff($now);
                     $totalHours = ($diff->days * 24) + $diff->h;
                     $responseTime = sprintf('%02dh %02dm (Waiting)', $totalHours, $diff->i);
@@ -92,14 +155,63 @@ class SupervisorController extends Controller
                     $responseTime = sprintf('%02dh %02dm', $totalHours, $diff->i);
                 }
 
+                // =========================================================
+                // START: [تحديد حالة الـ UI - منطق الـ SLA والحالات]
+                // =========================================================
+                $uiStatus = 'New';
+                if ($report->current_status === 'Pending') {
+                    $uiStatus = 'New'; // بلاغ جديد لم يُوزع بعد
+                } elseif ($report->current_status === 'Assigned') {
+                    // لو البلاغ متوزع بس اتخطى وقت الـ SLA يبقى Late، غير كدة يبقى Pending
+                    $uiStatus = ($assignedTime->diffInHours($now) > ($report->target_hours ?? 24)) ? 'Late' : 'Pending';
+                } elseif ($report->current_status === 'In Progress') {
+                    $uiStatus = 'In Progress'; // الفني شغال عليه حالياً
+                } elseif ($report->current_status === 'Completed') {
+                    $uiStatus = 'Fixed'; // تم الإصلاح والموافقة على الحل
+                } elseif ($report->current_status === 'Canceled') {
+                    $uiStatus = 'Rejected';
+                }
+                // =========================================================
+
                 return [
                     'report_id'       => $report->report_id,
                     'technician_name' => trim($report->technician->first_name . ' ' . $report->technician->last_name),
-                    'status'          => $report->current_status, 
+                    'status'          => $uiStatus, // بنرجع حالة الـ UI هنا عشان الفرونت يفلتر بسهولة
                     'add_comment'     => $report->supervisor_comment ?? '',
                     'response_time'   => $responseTime,
                 ];
-            });
+            })
+            // =========================================================
+            // START: [إضافة فلتر وقت الاستجابة والحالة بعد الحساب]
+            // =========================================================
+            ->filter(function ($task) use ($request) {
+                $passStatus = true;
+                $passResponseTime = true;
+
+                // 1. فلتر الحالة (Status)
+                // دلوقتى بنقارن اللي جاي من الفرونت بمسمى الـ UI مباشرة (Fixed, Late, etc.)
+                if ($request->has('statuses') && is_array($request->statuses) && !in_array('All', $request->statuses)) {
+                    $passStatus = in_array($task['status'], $request->statuses);
+                }
+
+                // 2. فلتر وقت الاستجابة (Response Time)
+                if ($request->has('response_time')) {
+                    preg_match('/(\d+)h/', $task['response_time'], $matches);
+                    $hours = isset($matches[1]) ? (int)$matches[1] : 0;
+
+                    if ($request->response_time === 'Less than 1 hour') {
+                        $passResponseTime = $hours < 1;
+                    } elseif ($request->response_time === '1-3 hours') {
+                        $passResponseTime = ($hours >= 1 && $hours <= 3);
+                    } elseif ($request->response_time === 'More than 3 hours') {
+                        $passResponseTime = $hours > 3;
+                    }
+                }
+
+                return $passStatus && $passResponseTime;
+            })
+            ->values(); // لإعادة ترتيب المصفوفة بعد الفلترة
+            // =========================================================
 
         return response()->json(['status' => true, 'data' => $tasks]);
     }
@@ -202,8 +314,8 @@ class SupervisorController extends Controller
             ]
         ]);
     }
-    // 6. جدول كل البلاغات (جلب النوع من قسم المشرف)
-    public function getAllReports()
+    // 6. جدول كل البلاغات (جلب النوع من قسم المشرف) مع إضافة الفلتر
+    public function getAllReports(Request $request) // <-- تم إضافة Request هنا لاستقبال الفلتر
     {
         $supervisorId = Auth::id();
         $now = Carbon::now();
@@ -211,6 +323,21 @@ class SupervisorController extends Controller
         // بنجيب الريبورت ومعاه بيانات المشرف (عشان ناخد اسم القسم)
         $reports = Report::with('supervisor') 
             ->where('supervisor_id', $supervisorId)
+
+            // =========================================================
+            // START: [إضافة الفلتر على مستوى الداتا بيز (التاريخ والأولوية)]
+            // =========================================================
+            ->when($request->priority, function ($query, $priority) {
+                // الفلتر بـ High, Medium, Low
+                return $query->where('priority_level', $priority);
+            })
+            ->when($request->date_from, function ($query, $dateFrom) use ($request) {
+                // الفلتر بالتاريخ (لو باعتين تاريخ بداية ونهاية أو تاريخ يوم واحد)
+                $dateTo = $request->date_to ? $request->date_to : $dateFrom;
+                return $query->whereBetween('created_at', [$dateFrom . ' 00:00:00', $dateTo . ' 23:59:59']);
+            })
+            // =========================================================
+
             ->orderBy('created_at', 'DESC') 
             ->get()
             ->map(function ($report) use ($now) {
@@ -253,7 +380,39 @@ class SupervisorController extends Controller
                     'response_time'=> $responseTime,
                     'status'       => $uiStatus,
                 ];
-            });
+            })
+            // =========================================================
+            // START: [إضافة الفلتر على مستوى البيانات بعد تجهيزها (الحالة ووقت الاستجابة)]
+            // =========================================================
+            ->filter(function ($report) use ($request) {
+                $passStatus = true;
+                $passResponseTime = true;
+
+                // 1. فلتر الحالة (Status)
+                // نستقبل مصفوفة الحالات مثلا: ['New', 'Fixed', 'Late']
+                if ($request->has('statuses') && is_array($request->statuses) && !in_array('All', $request->statuses)) {
+                    $passStatus = in_array($report['status'], $request->statuses);
+                }
+
+                // 2. فلتر وقت الاستجابة (Response Time)
+                if ($request->has('response_time')) {
+                    // استخراج عدد الساعات من النص المحسوب "05h 30m"
+                    preg_match('/(\d+)h/', $report['response_time'], $matches);
+                    $hours = isset($matches[1]) ? (int)$matches[1] : 0;
+
+                    if ($request->response_time === 'Less than 1 hour') {
+                        $passResponseTime = $hours < 1;
+                    } elseif ($request->response_time === '1-3 hours') {
+                        $passResponseTime = ($hours >= 1 && $hours <= 3);
+                    } elseif ($request->response_time === 'More than 3 hours') {
+                        $passResponseTime = $hours > 3;
+                    }
+                }
+
+                return $passStatus && $passResponseTime;
+            })
+            ->values(); // لإعادة ترتيب الـ keys بتاعة المصفوفة بعد الفلترة وإرسالها كـ Array نظيف للـ Front-end
+            // =========================================================
 
         return response()->json(['status' => true, 'data' => $reports]);
     }
