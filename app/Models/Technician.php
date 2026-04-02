@@ -20,6 +20,7 @@ class Technician extends Authenticatable
         'email',
         'phone',
         'address',
+        'profile_image',
         'date_of_birth',
         'work_shift',
         'job_title',
