@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Technician;
+use App\Models\Report;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Auth;
@@ -107,6 +108,72 @@ class TechnicianAuthController extends Controller
         return response()->json([
             'status'  => true,
             'message' => 'تم تسجيل الخروج بنجاح'
+        ]);
+    }
+
+
+    // 5. عرض قائمة المهام الخاصة بالفني (My Tasks)
+    public function myTasks()
+    {
+        $techId = auth()->user()->technician_id;
+
+        // جلب البلاغات المسندة لهذا الفني مع بيانات السوبر فايزر
+        $tasks = Report::where('technician_id', $techId)
+            ->with('supervisor') // لجلب بيانات السوبر فايزر ومنها القسم
+            ->orderBy('created_at', 'desc')
+            ->get();
+
+        $data = $tasks->map(function ($task) {
+            return [
+                'report_id' => $task->report_id,
+                'description' => $task->description,
+                'location'  => $task->location_address,
+                'status' => ($task->current_status == 'Assigned') ? 'New Task' : $task->current_status,
+                // سحب القسم من السوبر فايزر مباشرة
+                'category'  => $task->supervisor ? $task->supervisor->department_name : 'General',
+                'image' => $task->photo_url ? (str_starts_with($task->photo_url, 'http') ? $task->photo_url : url('storage/' . $task->photo_url)) : null,
+            ];
+        });
+
+        return response()->json([
+            'status' => true,
+            'data'   => $data
+        ]);
+    }
+
+    // 6. عرض تفاصيل مهمة محددة (Task Details)
+    public function taskDetails($id)
+    {
+        $techId = auth()->user()->technician_id;
+
+        // التأكد أن البلاغ يخص هذا الفني وجلب بيانات السوبر فايزر معه
+        $task = Report::where('technician_id', $techId)
+            ->where('report_id', $id)
+            ->with('supervisor')
+            ->first();
+
+        if (!$task) {
+            return response()->json([
+                'status'  => false,
+                'message' => 'المهمة غير موجودة أو غير مسندة إليك'
+            ], 404);
+        }
+
+        return response()->json([
+            'status' => true,
+            'data'   => [
+                'report_id'   => $task->report_id,
+                'description' => $task->description,
+                'location'    => $task->location_address,
+                'status'      => ($task->current_status == 'Assigned') ? 'New Task' : $task->current_status,
+                'category'    => $task->supervisor ? $task->supervisor->department_name : 'General',
+                'priority'    => $task->priority_level,
+                // تنسيق التاريخ زي ما في صورة الـ UI
+                'issue_date'  => $task->report_date ? $task->report_date->format('d M Y - h:i A') : null,
+                'image' => $task->photo_url ? (str_starts_with($task->photo_url, 'http') ? $task->photo_url : url('storage/' . $task->photo_url)) : null,
+                'latitude_longitude' => $task->latitude_longitude,
+                'supervisor_comment' => $task->supervisor_comment,
+            ]
         ]);
     }
 }

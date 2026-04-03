@@ -108,6 +108,8 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/profile', [TechnicianAuthController::class, 'getProfile']);
         Route::post('/profile/update-photo', [TechnicianAuthController::class, 'updatePhoto']);
         Route::post('/logout', [TechnicianAuthController::class, 'logout']);
+        Route::get('/my-tasks', [TechnicianAuthController::class, 'myTasks']);
+        Route::get('/task-details/{id}', [TechnicianAuthController::class, 'taskDetails']);
     });
 
 });
