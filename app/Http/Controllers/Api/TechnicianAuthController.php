@@ -110,8 +110,7 @@ class TechnicianAuthController extends Controller
             'message' => 'تم تسجيل الخروج بنجاح'
         ]);
     }
-
-
+    
     // 5. عرض قائمة المهام الخاصة بالفني (My Tasks)
     public function myTasks()
     {

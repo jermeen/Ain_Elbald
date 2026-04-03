@@ -61,6 +61,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/reports/my-tickets', [ReportController::class, 'index']);  
     Route::get('/reports/track/{id}', [ReportController::class, 'show']);   
     Route::get('/user/profile', [UserController::class, 'showProfile']);
+    Route::post('/user/update-profile', [UserController::class, 'updateProfile']);
     Route::post('/user/profile/update-photo', [UserController::class, 'updatePhoto']);
     Route::get('/user/notifications', [UserController::class, 'notifications']);
     Route::post('/user/logout', function (Request $request) {

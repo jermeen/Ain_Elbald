@@ -16,14 +16,43 @@ class UserController extends Controller
         return response()->json([
             'status' => true,
             'data' => [
-                'full_name' => $user->first_name . ' ' . $user->last_name,
-                'email' => $user->email,
-                'photo' => $user->photo ? asset('storage/' . $user->photo) : asset('default-avatar.png'),
+                // دمج الاسم هنا عشان يظهر كـ Full Name في الـ UI
+                'full_name' => trim($user->first_name . ' ' . $user->last_name),
+                'email'     => $user->email,
+                'photo'     => $user->photo ? asset('storage/' . $user->photo) : asset('default-avatar.png'),
             ]
         ]);
     }
 
-    // 2. تحديث الصورة الشخصية (اللي في الـ UI بـ Gallery/Camera)
+    // 2. [الإضافة المطلوبة]: تحديث بيانات البروفايل (الاسم)
+    public function updateProfile(Request $request)
+    {
+        $request->validate([
+            'full_name' => 'required|string|max:255',
+        ]);
+
+        $user = auth()->user();
+
+        // منطق تقسيم الاسم الكامل المبعوث من الـ UI إلى First و Last للداتا بيز
+        $parts = explode(' ', trim($request->full_name));
+        $firstName = $parts[0];
+        $lastName = (count($parts) > 1) ? implode(' ', array_slice($parts, 1)) : '';
+
+        $user->update([
+            'first_name' => $firstName,
+            'last_name'  => $lastName,
+        ]);
+
+        return response()->json([
+            'status' => true,
+            'message' => 'Profile updated successfully',
+            'data' => [
+                'full_name' => trim($user->first_name . ' ' . $user->last_name),
+            ]
+        ]);
+    }
+
+    // 3. تحديث الصورة الشخصية (اللي في الـ UI بـ Gallery/Camera)
     public function updatePhoto(Request $request)
     {
         $request->validate([
@@ -32,9 +61,9 @@ class UserController extends Controller
 
         $user = auth()->user();
 
-        // مسح الصورة القديمة لو موجودة
-        if ($user->photo) {
-            Storage::disk('public')->delete($user->photo);
+        // مسح الصورة القديمة من الـ Storage لو موجودة
+        if ($user->photo && \Storage::disk('public')->exists($user->photo)) {
+            \Storage::disk('public')->delete($user->photo);
         }
 
         $path = $request->file('photo')->store('profile_photos', 'public');
@@ -47,7 +76,7 @@ class UserController extends Controller
         ]);
     }
 
-    // 3. الإشعارات (Notifications) - بناءً على سكرينة الـ Reports اللي بعتيها
+    // 4. الإشعارات (Notifications) - بناءً على سكرينة الـ Reports اللي بعتيها
     public function notifications()
     {
         $user = auth()->user();

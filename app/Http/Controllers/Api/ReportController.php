@@ -156,6 +156,7 @@ class ReportController extends Controller
                                 'status'     => $report->current_status,
                                 'photo'      => $report->photo_url,
                                 'date'       => $report->created_at->format('Y-m-d'),
+                                'time'       => $report->created_at->format('h:i A'),
                                 'department' => $report->supervisor->department_name ?? 'الطوارئ العامة'
                             ];
                          });
@@ -170,50 +171,56 @@ class ReportController extends Controller
     /**
      * 3. تتبع بلاغ محدد
      */
-   public function show($id) {
-    try {
-        $report = Report::with(['statusUpdates' => function($query) { 
-                                $query->orderBy('timestamp', 'asc'); 
-                            }])
-                            ->where('user_id', auth()->id())
-                            ->findOrFail($id);
+    /**
+     * 3. تتبع بلاغ محدد
+     */
+    public function show($id) {
+        try {
+            $report = Report::with(['statusUpdates' => function($query) { 
+                $query->orderBy('timestamp', 'asc'); 
+            }])
+            ->where('user_id', auth()->id())
+            ->findOrFail($id);
 
-        // 1. تحويل الـ statusUpdates لمجموعة (Collection) عشان نعدل عليها
-        $updates = $report->statusUpdates;
+            $updates = $report->statusUpdates;
 
-        // 2. تجهيز الـ Timeline الأساسي
-        $timeline = $updates->map(function($update) {
-            return [
-                'status' => $update->new_status,
-                'info'   => $update->content,
-                'time'   => $update->timestamp->format('H:i A'),
-                'date'   => $update->timestamp->format('Y-m-d')
-            ];
-        })->toArray();
+            // تجهيز الـ Timeline مع حل مشكلة الوقت المكرر
+            $timeline = $updates->map(function($update) {
+                return [
+                    'status' => $update->new_status,
+                    'info'   => $update->content,
+                    // بنعرض الوقت اللي الحدث حصل فيه فعلاً من جدول التحديثات
+                    'time'   => $update->timestamp ? $update->timestamp->format('h:i A') : now()->format('h:i A'),
+                    'date'   => $update->timestamp ? $update->timestamp->format('Y-m-d') : now()->format('Y-m-d')
+                ];
+            })->toArray();
 
-        // 3. [الإضافة المطلوبة]: حقن حالة Under Review بعد الـ Submitted مباشرة
-        // نفترض أن أول حالة دائماً هي Submitted
-        if (count($timeline) > 0) {
-            $underReview = [
-                'status' => 'Under Review',
-                'info'   => 'Our team is reviewing the details of your ticket.',
-                'time'   => $report->created_at->addMinutes(2)->format('H:i A'), // وقت تقديري بعد التقديم بدقيقتين
-                'date'   => $report->created_at->format('Y-m-d')
-            ];
-            
-            // وضعها في المركز الثاني (Index 1) في المصفوفة
-            array_splice($timeline, 1, 0, [$underReview]);
-        }
+            // حقن حالة Under Review (عشان تظهر لليوزر إننا بنراجع البلاغ)
+            if (count($timeline) > 0) {
+                $submittedUpdate = $updates->where('new_status', 'Submitted')->first();
+                $baseTime = $submittedUpdate ? $submittedUpdate->timestamp : $report->created_at;
 
-        return response()->json([
-            'status' => true, 
-            'data'   => [
-                'details'  => $report->makeHidden(['statusUpdates']),
-                'timeline' => $timeline
-            ]
-        ]);
+                $underReview = [
+                    'status' => 'Under Review',
+                    'info'   => 'Our team is reviewing the details of your ticket.',
+                    // بنزود دقيقتين "وهمي" عن وقت التقديم عشان الشكل الجمالي في الـ UI
+                    'time'   => $baseTime->copy()->addMinutes(2)->format('h:i A'), 
+                    'date'   => $baseTime->format('Y-m-d')
+                ];
+                
+                // نضع Under Review في الخطوة الثانية دائماً
+                array_splice($timeline, 1, 0, [$underReview]);
+            }
+
+            return response()->json([
+                'status' => true, 
+                'data'   => [
+                    'details'  => $report->makeHidden(['statusUpdates']),
+                    'timeline' => $timeline
+                ]
+            ]);
         } catch (Exception $e) {
-        return response()->json(['status' => false, 'message' => 'البلاغ غير موجود'], 404);
+            return response()->json(['status' => false, 'message' => 'البلاغ غير موجود'], 404);
         }
     }
 }

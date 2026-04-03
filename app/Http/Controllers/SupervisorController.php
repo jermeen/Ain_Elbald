@@ -536,16 +536,25 @@ class SupervisorController extends Controller
 
         $report = Report::findOrFail($request->report_id);
         
-        // تحديث الحالة لـ Canceled (تظهر في الـ UI كـ Rejected)
+        // 1. تحديث الحالة لـ Canceled
         $report->update([
             'current_status' => 'Canceled',
         ]);
 
-        // --- NOTIFICATION: إرسال إشعار للمواطن (User) عند رفض بلاغه ---
+        // 2. تسجيل الحدث أوتوماتيكياً برسالة ثابتة في الـ Timeline
+        $report->statusUpdates()->create([
+            'supervisor_id' => auth()->id(),
+            'new_status'    => 'Canceled',
+            'update_type'   => 'Status Change',
+            'content'       => 'تم إلغاء البلاغ لعدم مطابقة البيانات المعايير المطلوبة، نرجو مراجعة التفاصيل وإعادة المحاولة.',
+            'timestamp'     => now(),
+        ]);
+
+        // --- إشعار للمواطن ---
         if ($report->user) {
             $report->user->notify(new \App\Notifications\GeneralNotification([
                 'title'     => 'Report Rejected',
-                'message'   => 'Sorry, your report #' . $report->report_id . ' has been rejected by the supervisor.',
+                'message'   => 'Your report #' . $report->report_id . ' has been canceled after review.',
                 'report_id' => $report->report_id,
                 'status'    => 'Rejected',
                 'photo'     => $report->photo_url,
