@@ -55,18 +55,20 @@ Route::middleware('auth:sanctum')->group(function () {
 
 
     // --- (2) مسارات المستخدم العادي فقط (الموبايل) ---
-    
-    Route::get('/user', [AuthController::class, 'me']); 
-    Route::post('/reports/create', [ReportController::class, 'store']);     
-    Route::get('/reports/my-tickets', [ReportController::class, 'index']);  
-    Route::get('/reports/track/{id}', [ReportController::class, 'show']);   
-    Route::get('/user/profile', [UserController::class, 'showProfile']);
-    Route::post('/user/update-profile', [UserController::class, 'updateProfile']);
-    Route::post('/user/profile/update-photo', [UserController::class, 'updatePhoto']);
-    Route::get('/user/notifications', [UserController::class, 'notifications']);
-    Route::post('/user/logout', function (Request $request) {
-        $request->user()->currentAccessToken()->delete();
-        return response()->json(['status' => true, 'message' => 'User logged out']);
+    // [تعديل]: إضافة Middleware لمنع الفني أو المشرف من دخول مسارات اليوزر
+    Route::middleware('is_user')->group(function () {
+        Route::get('/user', [AuthController::class, 'me']); 
+        Route::post('/reports/create', [ReportController::class, 'store']);     
+        Route::get('/reports/my-tickets', [ReportController::class, 'index']);  
+        Route::get('/reports/track/{id}', [ReportController::class, 'show']);   
+        Route::get('/user/profile', [UserController::class, 'showProfile']);
+        Route::post('/user/update-profile', [UserController::class, 'updateProfile']);
+        Route::post('/user/profile/update-photo', [UserController::class, 'updatePhoto']);
+        Route::get('/user/notifications', [UserController::class, 'notifications']);
+        Route::post('/user/logout', function (Request $request) {
+            $request->user()->currentAccessToken()->delete();
+            return response()->json(['status' => true, 'message' => 'User logged out']);
+        });
     });
 
 
@@ -105,12 +107,15 @@ Route::middleware('auth:sanctum')->group(function () {
     });
 
     // --- (4) مسارات الفني فقط (الموبايل) ---
-    Route::prefix('technician')->group(function () {
-        Route::get('/profile', [TechnicianAuthController::class, 'getProfile']);
-        Route::post('/profile/update-photo', [TechnicianAuthController::class, 'updatePhoto']);
-        Route::post('/logout', [TechnicianAuthController::class, 'logout']);
-        Route::get('/my-tasks', [TechnicianAuthController::class, 'myTasks']);
-        Route::get('/task-details/{id}', [TechnicianAuthController::class, 'taskDetails']);
+    // [تعديل]: إضافة Middleware للتأكد أن المستخدم فني فقط
+    Route::middleware('is_technician')->group(function () {
+        Route::prefix('technician')->group(function () {
+            Route::get('/profile', [TechnicianAuthController::class, 'getProfile']);
+            Route::post('/profile/update-photo', [TechnicianAuthController::class, 'updatePhoto']);
+            Route::post('/logout', [TechnicianAuthController::class, 'logout']);
+            Route::get('/my-tasks', [TechnicianAuthController::class, 'myTasks']);
+            Route::get('/task-details/{id}', [TechnicianAuthController::class, 'taskDetails']);
+        });
     });
 
 });

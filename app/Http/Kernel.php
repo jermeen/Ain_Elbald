@@ -64,6 +64,10 @@ class Kernel extends HttpKernel
         'signed' => \App\Http\Middleware\ValidateSignature::class,
         'throttle' => \Illuminate\Routing\Middleware\ThrottleRequests::class,
         'verified' => \Illuminate\Auth\Middleware\EnsureEmailIsVerified::class,
-        'is_supervisor' => \App\Http\Middleware\CheckSupervisor::class, // السطر اللي هنضيفه
+        'is_supervisor' => \App\Http\Middleware\CheckSupervisor::class, 
+        'is_technician' => \App\Http\Middleware\IsTechnician::class, // تأكدي من ده
+        'is_user'       => \App\Http\Middleware\IsUser::class,
+
+
     ];
 }
