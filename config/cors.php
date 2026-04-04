@@ -17,18 +17,18 @@ return [
 
     'paths' => ['api/*', 'sanctum/csrf-cookie'],
 
-    'allowed_methods' => ['*'],
+    'allowed_methods' => ['*'], // بيسمح بكل العمليات GET, POST, OPTIONS, إلخ
 
-    'allowed_origins' => ['*'],
+    'allowed_origins' => ['*'], // بيسمح بأي دومين يكلم السيرفر
 
     'allowed_origins_patterns' => [],
 
-    'allowed_headers' => ['*'],
+    'allowed_headers' => ['*'], // دي أهم واحدة.. بتسمح بمرور الـ Token (Authorization Header)
 
     'exposed_headers' => [],
 
     'max_age' => 0,
 
-    'supports_credentials' => false,
+    'supports_credentials' => true, // مهمة جداً لو فيه Cookies أو Sessions
 
 ];
