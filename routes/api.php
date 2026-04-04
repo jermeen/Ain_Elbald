@@ -115,6 +115,8 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::post('/logout', [TechnicianAuthController::class, 'logout']);
             Route::get('/my-tasks', [TechnicianAuthController::class, 'myTasks']);
             Route::get('/task-details/{id}', [TechnicianAuthController::class, 'taskDetails']);
+            Route::get('/in-progress-tasks', [TechnicianAuthController::class, 'inProgressTasks']);
+            Route::post('/start-task/{id}', [TechnicianAuthController::class, 'startTask']); // المسار الجديد
         });
     });
 

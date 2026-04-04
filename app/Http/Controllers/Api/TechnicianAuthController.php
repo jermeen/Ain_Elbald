@@ -111,36 +111,42 @@ class TechnicianAuthController extends Controller
         ]);
     }
     
-    // 5. عرض قائمة المهام الخاصة بالفني (My Tasks)
+    // 5. عرض قائمة "كل المهام" (My Tasks) - تظهر فيها كل الحالات
     public function myTasks()
     {
         $techId = auth()->user()->technician_id;
 
-        // جلب البلاغات المسندة لهذا الفني مع بيانات السوبر فايزر
         $tasks = Report::where('technician_id', $techId)
-            ->with('supervisor') // لجلب بيانات السوبر فايزر ومنها القسم
+            ->with('supervisor')
             ->orderBy('created_at', 'desc')
             ->get();
 
         $data = $tasks->map(function ($task) {
-            return [
-                'report_id' => $task->report_id,
-                'description' => $task->description,
-                'location'  => $task->location_address,
-                'status' => ($task->current_status == 'Assigned') ? 'New Task' : $task->current_status,
-                // سحب القسم من السوبر فايزر مباشرة
-                'category'  => $task->supervisor ? $task->supervisor->department_name : 'General',
-                'image' => $task->photo_url ? (str_starts_with($task->photo_url, 'http') ? $task->photo_url : url('storage/' . $task->photo_url)) : null,
-            ];
+            return $this->formatTaskData($task); // دالة موحدة لتنسيق البيانات
         });
 
-        return response()->json([
-            'status' => true,
-            'data'   => $data
-        ]);
+        return response()->json(['status' => true, 'data' => $data]);
     }
 
-    // 6. عرض تفاصيل مهمة محددة (Task Details)
+    // 6. [دالة مساعدة]: لتنسيق البيانات وتوحيدها في الـ APIs المختلفة
+    private function formatTaskData($task)
+    {
+        $uiStatus = $task->current_status;
+        if ($task->current_status === 'Assigned') $uiStatus = 'New Task';
+        if ($task->current_status === 'Completed') $uiStatus = 'Fixed';
+
+        return [
+            'report_id'   => $task->report_id,
+            'description' => $task->description,
+            'location'    => $task->location_address,
+            'status'      => $uiStatus, 
+            'category'    => $task->supervisor ? $task->supervisor->department_name : 'General',
+            'image'       => $task->photo_url ? (str_starts_with($task->photo_url, 'http') ? $task->photo_url : url('storage/' . $task->photo_url)) : null,
+            'date'        => $task->report_date ? $task->report_date->format('Y-m-d') : null,
+        ];
+    }
+
+    // 7. عرض تفاصيل مهمة محددة (Task Details)
     public function taskDetails($id)
     {
         $techId = auth()->user()->technician_id;
@@ -174,5 +180,67 @@ class TechnicianAuthController extends Controller
                 'supervisor_comment' => $task->supervisor_comment,
             ]
         ]);
+    }
+
+    // 7. بدء العمل على المهمة (Start Task)
+    public function startTask(Request $request, $id)
+    {
+        $techId = auth()->user()->technician_id;
+
+        $task = Report::where('technician_id', $techId)
+            ->where('report_id', $id)
+            ->first();
+
+        if (!$task) {
+            return response()->json(['status' => false, 'message' => 'المهمة غير موجودة'], 404);
+        }
+
+        // 1. تحديث حالة البلاغ
+        $task->update([
+            'current_status' => 'In Progress'
+        ]);
+
+        // 2. التسجيل في الـ Timeline (استخدام القيمة المظبوطة للـ Enum)
+        \App\Models\ReportStatusUpdate::create([
+            'report_id'   => $task->report_id,
+            'new_status'  => 'In Progress',
+            'update_type' => 'Status Change', // مطابقة تماماً للميجريشن بتاعك
+            'content'     => "الفني " . auth()->user()->first_name . " بدأ العمل على بلاغك الآن.",
+            'timestamp'   => now(),
+        ]);
+
+        return response()->json([
+            'status'  => true,
+            'message' => 'تم بدء العمل على المهمة بنجاح، البلاغ الآن في صفحة In Progress',
+            'data'    => [
+                'report_id' => $task->report_id,
+                'status'    => 'In Progress'
+            ]
+        ]);
+    }
+
+    // 8. [إضافة جديدة]: عرض "المهام الجاري العمل عليها" فقط (In Progress Tasks)
+    public function inProgressTasks()
+    {
+        $techId = auth()->user()->technician_id;
+
+        // بنفلتر هنا على حالة In Progress فقط
+        $tasks = Report::where('technician_id', $techId)
+            ->where('current_status', 'In Progress')
+            ->with('supervisor')
+            ->orderBy('updated_at', 'desc') // الأحدث تحديثاً يظهر أولاً
+            ->get();
+
+        $data = $tasks->map(function ($task) {
+            return [
+                'report_id'   => $task->report_id,
+                'description' => $task->description,
+                'status'      => 'In Progress', // الحالة ثابتة هنا لأننا بنفلتر عليها
+                'category'    => $task->supervisor ? $task->supervisor->department_name : 'General',
+                'image'       => $task->photo_url ? (str_starts_with($task->photo_url, 'http') ? $task->photo_url : url('storage/' . $task->photo_url)) : null,
+            ];
+        });
+
+        return response()->json(['status' => true, 'data' => $data]);
     }
 }
