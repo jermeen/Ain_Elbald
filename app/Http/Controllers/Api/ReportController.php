@@ -10,7 +10,7 @@ use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\Http;
 use Exception;
 use Illuminate\Support\Facades\Log;
-use App\Notifications\GeneralNotification; // [إضافة]: استدعاء كلاس الإشعارات
+use App\Notifications\GeneralNotification;
 
 class ReportController extends Controller
 {
@@ -59,8 +59,6 @@ class ReportController extends Controller
                     if ($tempConfidence >= 0.50) { 
                         $suggestedDeptName = $aiData['category'] ?? 'general_emergency';
                         $confidence = $tempConfidence;
-                    } else {
-                        Log::warning("AI Confidence low ({$tempConfidence}). Defaulting to General Emergency.");
                     }
                 }
             } catch (Exception $aiEx) {
@@ -87,62 +85,39 @@ class ReportController extends Controller
             ]);
 
             $deptNameAr = $supervisor ? $supervisor->department_name : "الطوارئ العامة (قيد الفرز)";
-            
-            $isReliable = ($confidence >= 0.50);
-            $timelineNote = (!$isReliable && $confidence > 0) 
-                            ? " (جاري التحقق من التصنيف من قبل المختصين)" 
-                            : "";
 
             $report->statusUpdates()->create([
                 'user_id'    => auth()->id(),
                 'new_status' => 'Submitted',
                 'update_type'=> 'Status Change',
-                'content'    => "تم استلام البلاغ وتوجيهه لقسم: " . $deptNameAr . $timelineNote,
+                'content'    => "تم استلام البلاغ وتوجيهه لقسم: " . $deptNameAr,
                 'timestamp'  => now(),
             ]);
 
-            // ========================================================================
-            // START: [إضافة الإشعار للسوبرفايزر الجديد - معدل ليطابق التصميم]
-            // ========================================================================
             if ($supervisor) {
                 $supervisor->notify(new GeneralNotification([
-                    // 1. العنوان هيكون اسم الجهة (مثلاً: مياه الشرب والصرف الصحي)
                     'title'       => $deptNameAr, 
-                    
-                    // 2. ده الرسالة الكاملة (ممكن تسيبيها لو حبيتي تستخدميها في مكان تاني)
-                    'message'     => 'A new report #' . $report->report_id . ' has been assigned to your department.',
-                    
-                    // 3. [مهم]: وصف البلاغ اللي اليوزر كتبه عشان يظهر تحت العنوان
+                    'message'     => 'A new report #' . $report->report_id . ' has been assigned.',
                     'description' => $request->description, 
-                    
                     'report_id'   => $report->report_id,
                     'status'      => 'New',
                     'photo'       => $report->photo_url,
                 ]));
             }
-            // ========================================================================
-            // END: [إضافة الإشعار]
-            // ========================================================================
 
             return response()->json([
                 'status'  => true,
                 'message' => 'تم إنشاء البلاغ وتصنيفه بنجاح',
-                'ai_analysis' => [
-                    'confidence'  => number_format($confidence, 2),
-                    'category'    => $suggestedDeptName,
-                    'is_reliable' => $isReliable
-                ],
-                'data' => $report->load('statusUpdates')
+                'data'    => $report->load('statusUpdates')
             ], 201);
 
         } catch (Exception $e) {
-            Log::error("Critical Store Error: " . $e->getMessage());
             return response()->json(['status' => false, 'message' => 'خطأ في حفظ البيانات'], 500);
         }
     }
 
     /**
-     * 2. عرض كل بلاغاتي
+     * 2. عرض كل بلاغاتي (تم التعديل هنا لتظهر Fixed)
      */
     public function index() {
         $reports = Report::with('supervisor')
@@ -153,7 +128,8 @@ class ReportController extends Controller
                             return [
                                 'report_id'  => $report->report_id,
                                 'title'      => $report->title,
-                                'status'     => $report->current_status,
+                                // التعديل: تحويل Completed لـ Fixed في قائمة البلاغات
+                                'status'     => ($report->current_status == 'Completed') ? 'Fixed' : $report->current_status,
                                 'photo'      => $report->photo_url,
                                 'date'       => $report->created_at->format('Y-m-d'),
                                 'time'       => $report->created_at->format('h:i A'),
@@ -169,12 +145,10 @@ class ReportController extends Controller
     }
 
     /**
-     * 3. تتبع بلاغ محدد
+     * 3. تتبع بلاغ محدد (تم التعديل لتطابق الـ Timeline والـ Details)
      */
-    /**
-     * 3. تتبع بلاغ محدد
-     */
-    public function show($id) {
+    public function show($id)
+    {
         try {
             $report = Report::with(['statusUpdates' => function($query) { 
                 $query->orderBy('timestamp', 'asc'); 
@@ -184,18 +158,19 @@ class ReportController extends Controller
 
             $updates = $report->statusUpdates;
 
-            // تجهيز الـ Timeline مع حل مشكلة الوقت المكرر
             $timeline = $updates->map(function($update) {
+                // تحويل الحالة في التايم لاين
+                $displayStatus = ($update->new_status == 'Completed') ? 'Fixed' : $update->new_status;
+
                 return [
-                    'status' => $update->new_status,
+                    'status' => $displayStatus,
                     'info'   => $update->content,
-                    // بنعرض الوقت اللي الحدث حصل فيه فعلاً من جدول التحديثات
                     'time'   => $update->timestamp ? $update->timestamp->format('h:i A') : now()->format('h:i A'),
                     'date'   => $update->timestamp ? $update->timestamp->format('Y-m-d') : now()->format('Y-m-d')
                 ];
             })->toArray();
 
-            // حقن حالة Under Review (عشان تظهر لليوزر إننا بنراجع البلاغ)
+            // حقن حالة Under Review
             if (count($timeline) > 0) {
                 $submittedUpdate = $updates->where('new_status', 'Submitted')->first();
                 $baseTime = $submittedUpdate ? $submittedUpdate->timestamp : $report->created_at;
@@ -203,19 +178,22 @@ class ReportController extends Controller
                 $underReview = [
                     'status' => 'Under Review',
                     'info'   => 'Our team is reviewing the details of your ticket.',
-                    // بنزود دقيقتين "وهمي" عن وقت التقديم عشان الشكل الجمالي في الـ UI
                     'time'   => $baseTime->copy()->addMinutes(2)->format('h:i A'), 
                     'date'   => $baseTime->format('Y-m-d')
                 ];
-                
-                // نضع Under Review في الخطوة الثانية دائماً
                 array_splice($timeline, 1, 0, [$underReview]);
+            }
+
+            $reportData = $report->makeHidden(['statusUpdates'])->toArray();
+            // تحويل الحالة في تفاصيل البلاغ
+            if ($reportData['current_status'] == 'Completed') {
+                $reportData['current_status'] = 'Fixed';
             }
 
             return response()->json([
                 'status' => true, 
                 'data'   => [
-                    'details'  => $report->makeHidden(['statusUpdates']),
+                    'details'  => $reportData,
                     'timeline' => $timeline
                 ]
             ]);

@@ -243,4 +243,152 @@ class TechnicianAuthController extends Controller
 
         return response()->json(['status' => true, 'data' => $data]);
     }
+
+    // api بتاع ارسال الابديت 
+    public function submitUpdate(Request $request, $id)
+{
+    // 1. التحقق
+    $request->validate([
+        'comment' => 'required|string',
+        'photo'   => 'nullable|image|mimes:jpeg,png,jpg|max:2048',
+    ]);
+
+    $techId = auth()->user()->technician_id;
+
+    // 2. جلب البلاغ
+    $report = Report::where('report_id', $id)
+        ->where('technician_id', $techId)
+        ->first();
+
+    if (!$report) {
+        return response()->json(['status' => false, 'message' => 'البلاغ غير موجود'], 404);
+    }
+
+    // 3. رفع الصورة
+    $photoPath = $report->after_photo_url;
+    if ($request->hasFile('photo')) {
+        $file = $request->file('photo');
+        $filename = time() . '_' . $file->getClientOriginalName();
+        $file->move(public_path('storage/reports/after'), $filename);
+        $photoPath = url('storage/reports/after/' . $filename);
+    }
+
+    // 4. تحديث حالة البلاغ
+    $report->update([
+        'current_status'        => 'Completed',
+        'after_photo_url'       => $photoPath,
+        'technician_final_note' => $request->comment,
+        'resolution_date'       => now(),
+    ]);
+
+    // 5. التايم لاين
+    \App\Models\ReportStatusUpdate::create([
+        'report_id'   => $report->report_id,
+        'new_status'  => 'Completed',
+        'update_type' => 'Resolution',
+        'content'     => "قام الفني بإنهاء العمل: " . $request->comment,
+        'timestamp'   => now(),
+    ]);
+
+    // 6. إرسال الإشعار (قبل الـ return)
+    if ($report->supervisor) {
+        $notificationData = [
+            'title'       => $report->supervisor->department_name ?? 'Task Completed', 
+            'report_id'   => $report->report_id,
+            'description' => "Technician finished work. Note: " . $request->comment,
+            'status'      => 'Fixed',
+            'photo'       => $photoPath,
+        ];
+        $report->supervisor->notify(new \App\Notifications\GeneralNotification($notificationData));
+    }
+
+    // 7. الرد النهائي
+    return response()->json([
+        'status'  => true,
+        'message' => 'Task submitted successfully and supervisor notified',
+        'data'    => [
+            'report_id' => $report->report_id,
+            'status'    => 'Fixed'
+        ]
+    ]);
+}
+
+    // يجيب صفحه البلاغات المكتمله 
+    public function completedTasks()
+    {
+    $techId = auth()->user()->technician_id;
+
+    // جلب البلاغات اللي حالتها Completed (واللي بنعرضها Fixed في الفرونت)
+    $tasks = Report::where('technician_id', $techId)
+        ->where('current_status', 'Completed')
+        ->orderBy('resolution_date', 'desc') 
+        ->get();
+
+    $data = $tasks->map(function ($report) {
+        return [
+            'report_id'   => $report->report_id,
+            'description' => $report->description,
+            'done_date'   => $report->resolution_date ? $report->resolution_date->format('j M Y') : $report->updated_at->format('j M Y'),
+            'status'      => 'Fixed',
+            // التعديل هنا: بنعرض صورة اليوزر الأصلية في القائمة
+            'photo'       => $report->photo_url ? url($report->photo_url) : null, 
+        ];
+    });
+
+    return response()->json([
+        'status' => true,
+        'data'   => $data
+    ]);
+    }
+
+
+    // تفااصيل كل بلاغ بعد الابديت 
+    public function completedTaskDetails($id)
+    {
+    $techId = auth()->user()->technician_id;
+
+    // بنجيب البلاغ مع علاقة السوبر فايزر
+    $report = Report::with(['supervisor']) 
+        ->where('report_id', $id)
+        ->where('technician_id', $techId)
+        ->where('current_status', 'Completed')
+        ->first();
+
+    if (!$report) {
+        return response()->json(['status' => false, 'message' => 'البلاغ غير موجود'], 404);
+    }
+
+    // 1. حساب المدة (Duration) ديناميكياً
+    $duration = 'N/A';
+    if ($report->report_date && $report->resolution_date) {
+        $days = $report->report_date->diffInDays($report->resolution_date);
+        
+        if ($days == 0) {
+            $duration = "Less than a day";
+        } elseif ($days < 7) {
+            $duration = $days . " days";
+        } else {
+            $weeks = floor($days / 7);
+            $remainingDays = $days % 7;
+            $duration = $weeks . " week" . ($weeks > 1 ? 's' : '') . ($remainingDays > 0 ? " and $remainingDays days" : "");
+        }
+    }
+
+    return response()->json([
+        'status' => true,
+        'data'   => [
+            'id'             => "#" . $report->report_id,
+            'location'       => $report->location_address ?? 'غير محدد',
+            'description'    => $report->description,
+            'duration'       => $duration,
+            'final_status'   => 'Fixed',
+            'category'       => $report->supervisor ? $report->supervisor->department_name : 'General',
+            'done_at'        => $report->updated_at ? $report->updated_at->format('j M Y - h:i A') : '',
+            'before_photo'   => $report->photo_url ? url($report->photo_url) : null,
+            'after_photo'    => $report->after_photo_url,
+            'technician_note'=> $report->technician_final_note
+            //'photo'       => $report->after_photo_url ?? $report->photo_url,
+        ]
+    ]);
+    }
 }

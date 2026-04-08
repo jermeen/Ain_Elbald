@@ -33,6 +33,8 @@ class Report extends Model
         'technician_id',
         'supervisor_comment',
         'target_hours',
+        'after_photo_url',
+        'technician_final_note',
     ];
 
     protected $casts = [

@@ -34,7 +34,7 @@ class GeneralNotification extends Notification
     {
         return [
             'title'     => $this->details['title'] ?? 'New Notification',
-            'description' => $this->data['description'] ?? '',
+            'description' => $this->details['description'] ?? '',
             'message'   => $this->details['message'] ?? '',
             'report_id' => $this->details['report_id'] ?? null,
             'status'    => $this->details['status'] ?? 'New',

@@ -646,7 +646,7 @@ class SupervisorController extends Controller
                 'status'      => $n->data['status'] ?? 'New', 
                 
                 // [الصورة]: رابط الصورة لو موجودة
-                'photo'       => ($n->data['photo'] ?? null) ? url($n->data['photo']) : null,
+                'photo' => ($n->data['photo'] ?? null) ? (filter_var($n->data['photo'], FILTER_VALIDATE_URL) ? $n->data['photo'] : url($n->data['photo'])) : null,
                 
                 // [التوقيت]: بصيغة مقروءة (1h, 4h ago)
                 'time_ago'    => $n->created_at->diffForHumans(), 

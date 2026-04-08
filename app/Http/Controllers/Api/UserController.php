@@ -92,6 +92,20 @@ class UserController extends Controller
             ->orderBy('updated_at', 'desc')
             ->get();
 
+        $newNotifications->transform(function ($report) {
+        if ($report->current_status === 'Completed') {
+            $report->current_status = 'Fixed';
+        }
+        return $report;
+        });
+
+        $lastWeekNotifications->transform(function ($report) {
+        if ($report->current_status === 'Completed') {
+            $report->current_status = 'Fixed';
+        }
+        return $report;
+        });
+
         return response()->json([
             'status' => true,
             'data' => [
