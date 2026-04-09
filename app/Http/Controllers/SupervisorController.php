@@ -216,19 +216,34 @@ class SupervisorController extends Controller
         return response()->json(['status' => true, 'data' => $tasks]);
     }
 
-    // 4. إضافة كومنت للفني
+    // 4. إضافة كومنت للفني (تعديل لإرسال إشعار)
     public function addComment(Request $request, $report_id)
     {
-        $request->validate(['supervisor_comment' => 'required|string']);
+    $request->validate(['supervisor_comment' => 'required|string']);
 
-        $report = Report::where('report_id', $report_id)
-                        ->where('supervisor_id', Auth::id())
-                        ->firstOrFail();
+    $report = Report::where('report_id', $report_id)
+                    ->where('supervisor_id', Auth::id())
+                    ->firstOrFail();
 
-        $report->update(['supervisor_comment' => $request->supervisor_comment]);
+    $report->update(['supervisor_comment' => $request->supervisor_comment]);
 
-        return response()->json(['status' => true, 'message' => 'Comment added successfully']);
+    // --- [إضافة]: إرسال إشعار للفني بالكومنت الجديد ---
+        if ($report->technician) {
+        $notificationData = [
+            'title'       => 'Supervisor Comment', // عشان يظهر بالنوع ده في الـ API
+            'report_id'   => $report->report_id,
+            'description' => $request->supervisor_comment,
+            'status'      => $report->current_status,
+            'photo'       => $report->photo_url,
+        ];
+        
+        // إرسال الإشعار للفني المسند إليه البلاغ
+        $report->technician->notify(new \App\Notifications\GeneralNotification($notificationData));
     }
+
+    return response()->json(['status' => true, 'message' => 'Comment added successfully and technician notified']);
+    }
+
 
     // 5. إحصائيات الصفحة الرئيسية (Dashboard Stats)
     public function getHomeDashboardStats()
@@ -314,6 +329,7 @@ class SupervisorController extends Controller
             ]
         ]);
     }
+
     // 6. جدول كل البلاغات (جلب النوع من قسم المشرف) مع إضافة الفلتر
     public function getAllReports(Request $request) // <-- تم إضافة Request هنا لاستقبال الفلتر
     {
@@ -627,41 +643,55 @@ class SupervisorController extends Controller
 
     // 12 --- NOTIFICATION: دالة جلب الإشعارات للسوبرفايزر (مطابقة للتصميم 100%) ---
     public function getNotifications()
-    {
-        $user = Auth::user();
+{
+    $user = Auth::user();
+    $now = now();
 
-        // جلب الإشعارات وترتيبها بالأحدث
-        $notifications = $user->notifications->map(function ($n) {
-            return [
-                // [العنوان]: هيظهر فيه اسم الجهة (مثل: مياه الشرب والصرف الصحي)
-                'title'       => $n->data['title'] ?? 'General Issue', 
-                
-                // [ID البلاغ]: هيظهر تحت العنوان مباشرة (#12345)
-                'report_id'   => isset($n->data['report_id']) ? '#' . $n->data['report_id'] : '', 
-                
-                // [الوصف]: هنا هيظهر وصف المشكلة اللي كتبه اليوزر بالظبط
-                'description' => $n->data['description'] ?? '', 
-                
-                // [الحالة]: (New, Fixed, On hold) عشان تلون في التصميم
-                'status'      => $n->data['status'] ?? 'New', 
-                
-                // [الصورة]: رابط الصورة لو موجودة
-                'photo' => ($n->data['photo'] ?? null) ? (filter_var($n->data['photo'], FILTER_VALIDATE_URL) ? $n->data['photo'] : url($n->data['photo'])) : null,
-                
-                // [التوقيت]: بصيغة مقروءة (1h, 4h ago)
-                'time_ago'    => $n->created_at->diffForHumans(), 
-                
-                // [التاريخ]: بصيغة (23 Nov) للتقسيم الزمني
-                'date'        => $n->created_at->format('d M'), 
-                
-                'is_read'     => $n->read_at !== null
-            ];
-        });
+    $notifications = $user->notifications->map(function ($n) use ($now) {
+        $reportId = $n->data['report_id'] ?? null;
+        $report = $reportId ? \App\Models\Report::find($reportId) : null;
 
-        return response()->json([
-            'status' => true, 
-            'data'   => $notifications
-        ]);
+        // --- [تطبيق الـ Mapping الجديد للحالات] ---
+        $uiStatus = 'New'; // الحالة الافتراضية
+        
+        if ($report) {
+            if ($report->current_status === 'Pending') {
+                $uiStatus = 'New';
+            } elseif ($report->current_status === 'Assigned') {
+                // حساب هل البلاغ تأخر عن الـ SLA المحدود له أم لا
+                $assignedTime = $report->updated_at; // أو الوقت اللي تم فيه التكليف
+                $uiStatus = ($assignedTime->diffInHours($now) > ($report->target_hours ?? 24)) ? 'Late' : 'Pending';
+            } elseif ($report->current_status === 'In Progress') {
+                $uiStatus = 'In Progress';
+            } elseif ($report->current_status === 'Completed') {
+                $uiStatus = 'Fixed';
+            } elseif ($report->current_status === 'Canceled') {
+                $uiStatus = 'Rejected'; 
+            }
+        }
+
+        // --- [تحديد الوصف] ---
+        $description = $n->data['description'] ?? '';
+        if (empty($description) && $report) {
+            $description = $report->description;
+        }
+
+        return [
+            'title'       => $n->data['title'] ?? 'General Issue', 
+            'report_id'   => $reportId ? '#' . $reportId : '', 
+            'description' => $description, 
+            'status'      => $uiStatus, // الحالة المعدلة للـ UI
+            'photo'       => ($n->data['photo'] ?? ($report ? $report->photo_url : null)) ? (filter_var($n->data['photo'] ?? $report->photo_url, FILTER_VALIDATE_URL) ? ($n->data['photo'] ?? $report->photo_url) : url($n->data['photo'] ?? $report->photo_url)) : null,
+            'time_ago'    => $n->created_at->diffForHumans(), 
+            'date'        => $n->created_at->format('d M'), 
+            'is_read'     => $n->read_at !== null
+        ];
+    });
+
+    return response()->json([
+        'status' => true, 
+        'data'   => $notifications
+    ]);
     }
 
     // 13 بنجيب بيانات السوبرفايزر الحالي

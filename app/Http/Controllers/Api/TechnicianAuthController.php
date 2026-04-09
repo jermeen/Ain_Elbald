@@ -182,7 +182,7 @@ class TechnicianAuthController extends Controller
         ]);
     }
 
-    // 7. بدء العمل على المهمة (Start Task)
+    // 8. بدء العمل على المهمة (Start Task)
     public function startTask(Request $request, $id)
     {
         $techId = auth()->user()->technician_id;
@@ -219,7 +219,7 @@ class TechnicianAuthController extends Controller
         ]);
     }
 
-    // 8. [إضافة جديدة]: عرض "المهام الجاري العمل عليها" فقط (In Progress Tasks)
+    // 9. [إضافة جديدة]: عرض "المهام الجاري العمل عليها" فقط (In Progress Tasks)
     public function inProgressTasks()
     {
         $techId = auth()->user()->technician_id;
@@ -244,7 +244,7 @@ class TechnicianAuthController extends Controller
         return response()->json(['status' => true, 'data' => $data]);
     }
 
-    // api بتاع ارسال الابديت 
+    // 10. api بتاع ارسال الابديت 
     public function submitUpdate(Request $request, $id)
 {
     // 1. التحقق
@@ -313,7 +313,7 @@ class TechnicianAuthController extends Controller
     ]);
 }
 
-    // يجيب صفحه البلاغات المكتمله 
+    // 11. يجيب صفحه البلاغات المكتمله 
     public function completedTasks()
     {
     $techId = auth()->user()->technician_id;
@@ -342,7 +342,7 @@ class TechnicianAuthController extends Controller
     }
 
 
-    // تفااصيل كل بلاغ بعد الابديت 
+    // 12. تفااصيل كل بلاغ بعد الابديت 
     public function completedTaskDetails($id)
     {
     $techId = auth()->user()->technician_id;
@@ -391,4 +391,66 @@ class TechnicianAuthController extends Controller
         ]
     ]);
     }
+    
+    // 13. [إضافة جديدة]: عرض قائمة الإشعارات للفني (New Task & Supervisor Comment
+    public function notifications()
+    {
+        $tech = auth()->user();
+
+        // 1. جلب البلاغات المسندة للفني (التي بها كومنت أو المسندة حديثاً)
+        // ده هيضمن إن أي حاجة قديمة تظهر
+        $reports = \App\Models\Report::with('supervisor')
+            ->where('technician_id', $tech->technician_id)
+            ->where(function($query) {
+                $query->whereNotNull('supervisor_comment')
+                      ->orWhereIn('current_status', ['Assigned', 'Pending', 'In Progress']);
+            })
+            ->orderBy('updated_at', 'desc')
+            ->get();
+
+        $formatted = $reports->map(function ($report) {
+            
+            // مسميات الحالة المتفق عليها
+            $uiStatus = $report->current_status;
+            if ($report->current_status === 'Assigned') $uiStatus = 'New';
+            if ($report->current_status === 'Completed') $uiStatus = 'Fixed';
+
+            // تحديد النوع: لو فيه كومنت يبقى Supervisor Comment
+            $hasComment = !empty($report->supervisor_comment);
+            $type = $hasComment ? 'Supervisor Comment' : 'New Task';
+
+            return [
+                'id'          => $report->report_id, // استخدام ID البلاغ
+                'report_id'   => "#" . $report->report_id,
+                'type'        => $type,
+                'title'       => $report->supervisor ? $report->supervisor->department_name : $report->report_type,
+                'description' => $hasComment ? $report->supervisor_comment : $report->description,
+                'status'      => $uiStatus, 
+                'photo'       => $report->photo_url ? (str_starts_with($report->photo_url, 'http') ? $report->photo_url : url('storage/' . $report->photo_url)) : null,
+                'time_ago'    => $report->updated_at->diffForHumans(['short' => true]),
+                'date'        => $report->updated_at->format('d M Y'),    
+                'time'        => $report->updated_at->format('h:i A'),    
+                'timestamp'   => $report->updated_at->toIso8601String(),
+                'updated_at_raw' => $report->updated_at,
+            ];
+        });
+
+        // التقسيم الزمني (آخر يومين و القديم)
+        $new = $formatted->filter(function($item) {
+            return $item['updated_at_raw'] >= now()->subDays(2);
+        })->values();
+
+        $lastWeek = $formatted->filter(function($item) {
+            return $item['updated_at_raw'] < now()->subDays(2);
+        })->values();
+
+        return response()->json([
+            'status' => true,
+            'data' => [
+                'new'       => $new,
+                'last_week' => $lastWeek
+            ]
+        ]);
+    }
+    
 }

@@ -120,6 +120,7 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::post('/submit-update/{id}', [TechnicianAuthController::class, 'submitUpdate']);
             Route::get('/completed-tasks', [TechnicianAuthController::class, 'completedTasks']);
             Route::get('/completed-task-details/{id}', [TechnicianAuthController::class, 'completedTaskDetails']);
+            Route::get('/notifications', [TechnicianAuthController::class, 'notifications']);
         });
     });
 
