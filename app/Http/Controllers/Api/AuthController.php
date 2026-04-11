@@ -50,6 +50,8 @@ class AuthController extends Controller
         ]);
 
         $token = $user->createToken("API_TOKEN")->plainTextToken;
+        // [إضافة]: إرسال إيميل التفعيل الحقيقي
+        $user->notify(new \App\Notifications\VerifyEmailNotification($v_code, 'verify'));
 
         return response()->json([
             'status' => true,
@@ -150,6 +152,9 @@ class AuthController extends Controller
                 'created_at' => now()
             ]
         );
+
+        // [إضافة]: إرسال إيميل إعادة تعيين الباسورد
+        $user->notify(new \App\Notifications\VerifyEmailNotification($token, 'reset'));
         
         // *** لغرض الاختبار: إرجاع الكود في الـ Response ***
         return response()->json([
