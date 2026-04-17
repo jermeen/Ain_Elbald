@@ -9,6 +9,7 @@ use App\Http\Controllers\Api\SocialAuthController;
 use App\Http\Controllers\Api\SupervisorAuthController;
 use App\Http\Controllers\SupervisorController; // استدعاء الكنترولر الجديد
 use App\Http\Controllers\Api\TechnicianAuthController; // استدعاء كنترولر الفني
+use App\Http\Controllers\Api\AdminAuthController;
 
 /*
 |--------------------------------------------------------------------------
@@ -25,6 +26,9 @@ Route::post('/supervisor/login', [SupervisorAuthController::class, 'login']);
 
 // تسجيل دخول الفني (الموبايل)
 Route::post('/technician/login', [TechnicianAuthController::class, 'login']);
+
+// راوت تسجيل الدخول (خارج الـ Middleware)
+Route::post('/admin/login', [AdminAuthController::class, 'login']);
 
 // مسارات المصادقة للمستخدم العادي (الموبايل)
 Route::controller(AuthController::class)->group(function () {
@@ -124,9 +128,18 @@ Route::middleware('auth:sanctum')->group(function () {
         });
     });
 
-});
+
+    // --- (5) مسارات الأدمن فقط (الداش بورد الرئيسي) ---
+    Route::middleware(['auth:sanctum', 'is_admin'])->prefix('admin')->group(function () {
+           Route::get('/profile', [AdminAuthController::class, 'getProfile']);
+           Route::post('/profile/update', [AdminAuthController::class, 'updateProfile']);
+           Route::post('/logout', [AdminAuthController::class, 'logout']);
+        });
+    });
 
 // مسار التجربة
 Route::get('/test-admins', function () {
     return App\Models\Admin::all();
 });
+
+
