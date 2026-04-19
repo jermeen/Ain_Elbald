@@ -214,7 +214,7 @@ class AdminAuthController extends Controller
             if ($report->current_status === 'Pending') {
             $title = "New report submitted";
             $dept = $report->supervisor->department_name ?? 'General';
-            $loc = $report->location_name ?? 'Area';
+            $loc = $report->location_address ?? 'Area';
             $desc = "New report for {$dept} reported in {$loc}";
             $label = "New";
             }
