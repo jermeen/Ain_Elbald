@@ -235,6 +235,7 @@ class TechnicianAuthController extends Controller
             return [
                 'report_id'   => $task->report_id,
                 'description' => $task->description,
+                'location'    => $task->location_address,
                 'status'      => 'In Progress', // الحالة ثابتة هنا لأننا بنفلتر عليها
                 'category'    => $task->supervisor ? $task->supervisor->department_name : 'General',
                 'image'       => $task->photo_url ? (str_starts_with($task->photo_url, 'http') ? $task->photo_url : url('storage/' . $task->photo_url)) : null,
