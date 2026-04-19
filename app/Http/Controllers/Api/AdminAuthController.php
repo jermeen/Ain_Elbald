@@ -109,7 +109,7 @@ class AdminAuthController extends Controller
     $allReports = Report::all();
     $totalReports = $allReports->count();
 
-    // متغيرات العدادات
+    // 1. العدادات الأساسية (نفس كودك)
     $stats = [
         'New'         => 0,
         'Pending'     => 0,
@@ -120,8 +120,7 @@ class AdminAuthController extends Controller
     ];
 
     foreach ($allReports as $report) {
-        $uiStatus = 'New'; // الحالة الافتراضية
-
+        $uiStatus = 'New';
         if ($report->current_status === 'Pending') {
             $uiStatus = 'New';
         } 
@@ -129,7 +128,6 @@ class AdminAuthController extends Controller
             $assignedTime = $report->updated_at; 
             $hoursPassed = $assignedTime->diffInHours($now);
             $target = $report->target_hours ?? 24;
-
             $uiStatus = ($hoursPassed > $target) ? 'Late' : 'Pending';
         } 
         elseif ($report->current_status === 'In Progress') {
@@ -147,21 +145,98 @@ class AdminAuthController extends Controller
         }
     }
 
-    // --- إحصائيات الفنيين ---
+    // 2. إحصائيات الفنيين (نفس كودك)
     $allTechs = Technician::withCount(['reports as workload' => function($query) {
         $query->whereIn('current_status', ['Assigned', 'In Progress']);
     }])->get();
 
-    $availableTechs = 0;
-    $busyTechs = 0;
-
+    $availableTechs = 0; $busyTechs = 0;
     foreach ($allTechs as $tech) {
         if ($tech->status === 'Active') {
             ($tech->workload >= 5) ? $busyTechs++ : $availableTechs++;
         }
     }
 
-    // --- توزيع المشاكل حسب القسم (تم إضافة % للنسبة) ---
+    // 3. أداء الإدارات (الجدول اللي عملناه سوا)
+    $departmentPerformance = Supervisor::select('department_name', 'supervisor_id')
+        ->get()
+        ->map(function ($dept) use ($now) {
+            $deptReports = Report::where('supervisor_id', $dept->supervisor_id)->get();
+            $totalDeptReports = $deptReports->count();
+            if ($totalDeptReports == 0) {
+                return [
+                    'department' => $dept->department_name,
+                    'assigned_reports' => 0,
+                    'avg_response_time' => '0 hours',
+                    'late_percentage' => '0%',
+                    'status' => 'Excellent'
+                ];
+            }
+
+            $lateCount = 0; $totalResponseHours = 0; $respondedCount = 0;
+            foreach ($deptReports as $report) {
+                if ($report->current_status === 'Assigned') {
+                    if ($report->updated_at->diffInHours($now) > ($report->target_hours ?? 24)) {
+                        $lateCount++;
+                    }
+                }
+                if (in_array($report->current_status, ['Assigned', 'In Progress', 'Completed'])) {
+                    $totalResponseHours += $report->report_date->diffInHours($report->updated_at);
+                    $respondedCount++;
+                }
+            }
+            $latePercent = round(($lateCount / $totalDeptReports) * 100, 1);
+            $avgResTime = $respondedCount > 0 ? round($totalResponseHours / $respondedCount, 1) : 0;
+            $status = ($latePercent > 35) ? 'Alert' : (($latePercent > 15) ? 'Good' : 'Excellent');
+
+            return [
+                'department' => $dept->department_name,
+                'assigned_reports' => $totalDeptReports,
+                'avg_response_time' => $avgResTime . ' hours',
+                'late_percentage' => $latePercent . '%',
+                'status' => $status
+            ];
+        });
+
+    // --- 4. الجزء المعدل: النشاطات الأخيرة في آخر 5 دقايق  فقط ---
+    $fiveMinutesAgo = now()->subMinutes(5);
+
+    $recentActivity = Report::with('supervisor')
+        ->where('updated_at', '>=', $fiveMinutesAgo) //فلترة: البلاغات اللي اتعدلت في آخر 5  دقايق 
+        ->orderBy('updated_at', 'desc') // الأحدث أولاً
+        ->limit(10) // بحد أقصى 10 بلاغات
+        ->get()
+        ->map(function ($report) {
+            $title = "Action Updated";
+            $desc = "Report #{$report->report_id} status changed.";
+            $label = "System";
+
+            if ($report->current_status === 'Pending') {
+            $title = "New report submitted";
+            $dept = $report->supervisor->department_name ?? 'General';
+            $loc = $report->location_name ?? 'Area';
+            $desc = "New report for {$dept} reported in {$loc}";
+            $label = "New";
+            }
+            elseif ($report->current_status === 'Assigned') {
+                $title = "Report Assigned";
+                $desc = "Report #{$report->report_id} assigned to " . ($report->supervisor->department_name ?? 'Department');
+                $label = "In Progress";
+            } 
+            elseif ($report->current_status === 'Canceled') {
+                $title = "Report Rejected";
+                $desc = "Report #{$report->report_id} was rejected by Supervisor " . ($report->supervisor->last_name ?? 'Admin');
+                $label = "Pending"; //Rejected
+            }
+
+            return [
+                'title' => $title,
+                'description' => $desc,
+                'status' => $label,
+                'time' => $report->updated_at->diffForHumans(), // هيظهر "5 mins ago" مثلاً
+            ];
+        });
+    // 5. باقي الإحصائيات (نفس كودك)
     $issueDistribution = Report::join('supervisors', 'reports.supervisor_id', '=', 'supervisors.supervisor_id')
         ->select('supervisors.department_name', DB::raw('count(*) as count'))
         ->groupBy('supervisors.department_name')
@@ -174,9 +249,7 @@ class AdminAuthController extends Controller
             ];
         });
 
-    // --- حساب متوسط دقة الـ AI ووقت الاستجابة ---
     $aiAccuracy = Report::whereNotNull('ai_confidence_score')->avg('ai_confidence_score') ?? 0;
-
     $avgResponseTime = Report::whereIn('current_status', ['Assigned', 'In Progress', 'Completed'])
         ->select(DB::raw('AVG(TIMESTAMPDIFF(HOUR, report_date, updated_at)) as avg_hours'))
         ->first()->avg_hours ?? 0;
@@ -195,21 +268,19 @@ class AdminAuthController extends Controller
                 'ai_accuracy'   => round($aiAccuracy * 100, 1) . '%',
                 'response_time' => round($avgResponseTime, 1) . ' Hours'
             ],
-            'technicians_summary' => [
-                'busy'      => $busyTechs,
-                'available' => $availableTechs,
-            ],
+            'technicians_summary' => ['busy' => $busyTechs, 'available' => $availableTechs],
             'report_status_chart' => [
                 ['status' => 'Late', 'percentage' => ($totalReports > 0 ? round(($stats['Late'] / $totalReports) * 100, 1) : 0) . '%'],
                 ['status' => 'In Progress', 'percentage' => ($totalReports > 0 ? round(($stats['In Progress'] / $totalReports) * 100, 1) : 0) . '%'],
                 ['status' => 'Fixed', 'percentage' => ($totalReports > 0 ? round(($stats['Fixed'] / $totalReports) * 100, 1) : 0) . '%'],
                 ['status' => 'Pending', 'percentage' => ($totalReports > 0 ? round(($stats['Pending'] / $totalReports) * 100, 1) : 0) . '%'],
             ],
-            'issue_distribution' => $issueDistribution
+            'issue_distribution' => $issueDistribution,
+            'department_performance' => $departmentPerformance,
+            'recent_activity' => $recentActivity 
         ]
     ]);
     }
-
 
 
 }
