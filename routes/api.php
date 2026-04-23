@@ -135,6 +135,8 @@ Route::middleware('auth:sanctum')->group(function () {
            Route::post('/profile/update', [AdminAuthController::class, 'updateProfile']);
            Route::post('/logout', [AdminAuthController::class, 'logout']);
            Route::get('/dashboard-analysis', [AdminAuthController::class, 'getDashboardAnalysis']);
+           Route::get('/reports', [AdminAuthController::class, 'getAllReports']);
+           Route::get('/reports/{id}', [AdminAuthController::class, 'getReportDetails']);
         });
     });
 

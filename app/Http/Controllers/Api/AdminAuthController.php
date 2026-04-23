@@ -12,6 +12,7 @@ use App\Models\Report;
 use App\Models\Technician;
 use App\Models\Supervisor;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 
 class AdminAuthController extends Controller
 {
@@ -282,5 +283,110 @@ class AdminAuthController extends Controller
     ]);
     }
 
+    //  ف الادمن  AllReports جدول ال 
+    public function getAllReports(Request $request)
+    {
+    $now = now();
+    $query = Report::with(['supervisor']);
+
+    // فلاتر البحث (Search Bar)
+    if ($request->has('search')) {
+        $query->where('report_id', 'like', '%' . $request->search . '%');
+    }
+
+    // فلاتر القوائم (Status, Priority, Department)
+    if ($request->has('status') && $request->status != 'All') {
+        // ملحوظة: الفلترة هنا هتم على الحالات الأصلية في الداتابيز
+        $query->where('current_status', $request->status);
+    }
+
+    $reports = $query->orderBy('created_at', 'desc')->paginate(10);
+
+    $formattedReports = $reports->getCollection()->map(function ($report) use ($now) {
+        // --- تطبيق المنطق الخاص بكِ لتحديد الـ UI Status ---
+        $uiStatus = 'New';
+        if ($report->current_status === 'Pending') {
+            $uiStatus = 'New';
+        } 
+        elseif ($report->current_status === 'Assigned') {
+            $hoursPassed = $report->updated_at->diffInHours($now);
+            $target = $report->target_hours ?? 24;
+            $uiStatus = ($hoursPassed > $target) ? 'Late' : 'Pending';
+        } 
+        elseif ($report->current_status === 'In Progress') {
+            $uiStatus = 'In Progress';
+        } 
+        elseif ($report->current_status === 'Completed') {
+            $uiStatus = 'Fixed';
+        } 
+        elseif ($report->current_status === 'Canceled') {
+            $uiStatus = 'Rejected';
+        }
+
+        return [
+            'report_id'      => "#" . $report->report_id,
+            'department'     => $report->supervisor->department_name ?? 'N/A',
+            'submitted_date' => $report->created_at->format('d M Y'),
+            'priority'       => $report->priority_level ?? 'Medium',
+            'status'         => $uiStatus, // الحالة المعدلة بناءً على طلبك
+            'db_id'          => $report->report_id, 
+        ];
+    });
+
+    return response()->json([
+        'status' => true,
+        'data'   => $formattedReports,
+        'meta'   => [
+            'current_page' => $reports->currentPage(),
+            'last_page'    => $reports->lastPage(),
+            'total'        => $reports->total(),
+        ]
+    ]);
+    }
+
+    // زرار ال view ف جدول البلاغات ف الادمن 
+    public function getReportDetails($id)
+    {
+    $now = now();
+    $report = Report::with('supervisor')->find($id);
+
+    if (!$report) {
+        return response()->json(['status' => false, 'message' => 'Report not found'], 404);
+    }
+
+    // توحيد منطق الـ Status هنا أيضاً
+    $uiStatus = 'New';
+    if ($report->current_status === 'Pending') {
+        $uiStatus = 'New';
+    } 
+    elseif ($report->current_status === 'Assigned') {
+        $hoursPassed = $report->updated_at->diffInHours($now);
+        $target = $report->target_hours ?? 24;
+        $uiStatus = ($hoursPassed > $target) ? 'Late' : 'Pending';
+    } 
+    elseif ($report->current_status === 'In Progress') {
+        $uiStatus = 'In Progress';
+    } 
+    elseif ($report->current_status === 'Completed') {
+        $uiStatus = 'Fixed';
+    } 
+    elseif ($report->current_status === 'Canceled') {
+        $uiStatus = 'Rejected';
+    }
+
+    return response()->json([
+        'status' => true,
+        'data'   => [
+            'id'             => "#" . $report->report_id,
+            'issue_name'     => $report->description ?? 'N/A', // حقل العنوان
+            'location'       => $report->location_address ?? 'N/A', // حقل المنطقة
+            'status'         => $uiStatus,
+            'category'       => $report->supervisor->department_name ?? 'N/A',
+            'priority'       => $report->priority_level ?? 'High',
+            'issue_date'     => $report->created_at->format('j M Y - h:i A'),
+            'image_url' => $report->photo_url ? (Str::contains($report->photo_url, 'http') ? $report->photo_url : asset('storage/' . $report->photo_url)) : null,
+        ]
+    ]);
+    }
 
 }
