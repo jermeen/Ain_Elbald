@@ -13,6 +13,7 @@ use App\Models\Technician;
 use App\Models\Supervisor;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use App\Models\User;
 
 class AdminAuthController extends Controller
 {
@@ -289,21 +290,21 @@ class AdminAuthController extends Controller
     $now = now();
     $query = Report::with(['supervisor']);
 
-    // فلاتر البحث (Search Bar)
-    if ($request->has('search')) {
+      // فلاتر البحث (Search Bar)
+      if ($request->has('search')) {
         $query->where('report_id', 'like', '%' . $request->search . '%');
-    }
+      }
 
-    // فلاتر القوائم (Status, Priority, Department)
-    if ($request->has('status') && $request->status != 'All') {
-        // ملحوظة: الفلترة هنا هتم على الحالات الأصلية في الداتابيز
+      // فلاتر القوائم (Status, Priority, Department)
+      if ($request->has('status') && $request->status != 'All') {
         $query->where('current_status', $request->status);
-    }
+      }
 
-    $reports = $query->orderBy('created_at', 'desc')->paginate(10);
+       // [تعديل]: جلب كل التقارير دفعة واحدة بدلاً من التقسيم لصفحات
+       $reports = $query->orderBy('created_at', 'desc')->get();
 
-    $formattedReports = $reports->getCollection()->map(function ($report) use ($now) {
-        // --- تطبيق المنطق الخاص بكِ لتحديد الـ UI Status ---
+        $formattedReports = $reports->map(function ($report) use ($now) {
+        // --- تطبيق المنطق الخاص بكِ لتحديد الـ UI Status (كما هو بدون تغيير) ---
         $uiStatus = 'New';
         if ($report->current_status === 'Pending') {
             $uiStatus = 'New';
@@ -328,19 +329,15 @@ class AdminAuthController extends Controller
             'department'     => $report->supervisor->department_name ?? 'N/A',
             'submitted_date' => $report->created_at->format('d M Y'),
             'priority'       => $report->priority_level ?? 'Medium',
-            'status'         => $uiStatus, // الحالة المعدلة بناءً على طلبك
+            'status'         => $uiStatus, 
             'db_id'          => $report->report_id, 
         ];
     });
 
     return response()->json([
         'status' => true,
-        'data'   => $formattedReports,
-        'meta'   => [
-            'current_page' => $reports->currentPage(),
-            'last_page'    => $reports->lastPage(),
-            'total'        => $reports->total(),
-        ]
+        'count'  => $formattedReports->count(), // عدد التقارير الإجمالي
+        'data'   => $formattedReports
     ]);
     }
 
@@ -384,8 +381,68 @@ class AdminAuthController extends Controller
             'category'       => $report->supervisor->department_name ?? 'N/A',
             'priority'       => $report->priority_level ?? 'High',
             'issue_date'     => $report->created_at->format('j M Y - h:i A'),
-            'image_url' => $report->photo_url ? (Str::contains($report->photo_url, 'http') ? $report->photo_url : asset('storage/' . $report->photo_url)) : null,
+            'image_url' => $report->photo_url ? (Str::contains($report->photo_url, 'http') ? $report->photo_url           :asset('storage/' . $report->photo_url)) : null,  
         ]
+    ]);
+    }
+
+    // جلب بيانات كل اليوزر ف الابلكيشن 
+    public function getAllUsers(Request $request)
+    {
+    $query = User::query();
+
+    // البحث بالاسم أو الـ ID
+    if ($request->has('search')) {
+        $search = $request->search;
+        $query->where(function($q) use ($search) {
+            $q->where('User_id', 'like', "%$search%")
+              ->orWhere('first_name', 'like', "%$search%")
+              ->orWhere('last_name', 'like', "%$search%");
+        });
+    }
+
+    // جلب كل المستخدمين بدون تقسيم لصفحات
+    $users = $query->orderBy('created_at', 'desc')->get();
+
+    $formattedUsers = $users->map(function ($user) {
+        return [
+            'id'           => $user->User_id,
+            'name'         => $user->first_name . ' ' . $user->last_name,
+            'email'        => $user->email,
+            'phone'        => $user->phone ?? 'N/A',
+            // تنسيق التاريخ بالمسافات والشرطة المائلة كما في التصميم
+    'date'   => $user->date_of_birth ? \Carbon\Carbon::parse($user->date_of_birth)->format('d / m / Y'):'N/A',
+            'created_at'   => $user->created_at->format('d M Y'),
+            'status'       => $user->is_active ? 'Active' : 'Blocked',
+        ];
+    });
+
+    return response()->json([
+        'status' => true,
+        'count'  => $formattedUsers->count(),
+        'data'   => $formattedUsers
+    ]);
+    }
+
+
+    //  لحظر اليوزر من استخدام الابلكيشن 
+    public function toggleUserStatus($id)
+    {
+    $user = User::find($id);
+    if (!$user) {
+        return response()->json(['status' => false, 'message' => 'User not found'], 404);
+    }
+
+    // تبديل الحالة
+    $user->is_active = !$user->is_active;
+    $user->save();
+
+    $statusMessage = $user->is_active ? 'User unblocked successfully' : 'User blocked successfully';
+
+    return response()->json([
+        'status'  => true,
+        'message' => $statusMessage,
+        'current_status' => $user->is_active
     ]);
     }
 

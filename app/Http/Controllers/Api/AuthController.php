@@ -110,6 +110,16 @@ class AuthController extends Controller
 
         $user = Auth::user();
 
+        
+        // [تعديل جديد]: التحقق مما إذا كان المستخدم محظوراً من قبل الأدمن
+        if (isset($user->is_active) && !$user->is_active) {
+            Auth::logout(); // تسجيل خروج الجلسة الحالية لضمان الأمان
+            return response()->json([
+                'status' => false,
+                'message' => 'عفواً، تم حظر هذا الحساب من قبل الإدارة. يرجى التواصل مع الدعم الفني.',
+            ], 403);
+        }
+
         // [تعديل]: منع الدخول إذا كان الحساب غير مفعل
         if (!$user->is_verified) {
             return response()->json([
