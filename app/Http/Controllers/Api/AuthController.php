@@ -116,7 +116,7 @@ class AuthController extends Controller
             Auth::logout(); // تسجيل خروج الجلسة الحالية لضمان الأمان
             return response()->json([
                 'status' => false,
-                'message' => 'عفواً، تم حظر هذا الحساب من قبل الإدارة. يرجى التواصل مع الدعم الفني.',
+                'message' => 'This account has been blocked by the administration. Please contact technical support',
             ], 403);
         }
 

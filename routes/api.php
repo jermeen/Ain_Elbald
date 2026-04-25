@@ -137,6 +137,8 @@ Route::middleware('auth:sanctum')->group(function () {
            Route::get('/dashboard-analysis', [AdminAuthController::class, 'getDashboardAnalysis']);
            Route::get('/reports', [AdminAuthController::class, 'getAllReports']);
            Route::get('/reports/{id}', [AdminAuthController::class, 'getReportDetails']);
+           Route::get('/ai-review', [AdminAuthController::class, 'getAiRejectedReports']);
+           Route::post('/reports/{id}/approve', [AdminAuthController::class, 'approveReport']);
            // إدارة المستخدمين
            Route::get('/users', [AdminAuthController::class, 'getAllUsers']);
            Route::post('/users/{id}/toggle-status', [AdminAuthController::class, 'toggleUserStatus']);

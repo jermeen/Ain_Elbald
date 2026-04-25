@@ -446,4 +446,93 @@ class AdminAuthController extends Controller
     ]);
     }
 
+
+    // جدول البلاغات المرفوضه عند الادمن 
+    public function getAiRejectedReports(Request $request)
+    {
+    // وبنعمل Eager Loading للمشرف عشان نجيب منه اسم القسم
+    $query = Report::with(['supervisor'])
+        ->where('current_status', 'Canceled');
+
+    // 1. فلتر البحث بـ ID البلاغ أو الوصف
+    if ($request->has('search')) {
+        $search = $request->search;
+        $query->where(function($q) use ($search) {
+            $q->where('report_id', 'like', "%$search%")
+              ->orWhere('description', 'like', "%$search%");
+        });
+    }
+
+    // 2. فلتر القسم (Ai Category)
+    if ($request->has('category') && $request->category != 'All') {
+        $query->whereHas('supervisor', function($q) use ($request) {
+            $q->where('department_name', $request->category);
+        });
+    }
+
+    // 3. فلتر نسبة الثقة (Confidence)
+    if ($request->has('confidence') && $request->confidence != 'All') {
+        $threshold = (float)$request->confidence / 100;
+        $query->where('ai_confidence_score', '<=', $threshold);
+    }
+
+    $reports = $query->orderBy('ai_confidence_score', 'asc')->get();
+
+    $formattedReports = $reports->map(function ($report) {
+        return [
+            'db_id'         => $report->report_id,
+            'report_id'     => "#" . $report->report_id,
+            'description'   => $report->description,
+            'ai_category'   => $report->supervisor->department_name ?? 'Unassigned',
+            'confidence'    => ($report->ai_confidence_score * 100) . "%",
+            'status'        => 'Rejected', 
+            // --- الحقول الجديدة للـ Pop-up ---
+            'photo_url'     => $report->photo_url, // صورة البلاغ
+            'location'      => $report->location_address, // الموقع النصي
+            'priority'      => $report->priority_level ?? 'Normal', // الأولوية
+            'issue_date'    => $report->report_date->format('d M Y - h:i A'), // التاريخ المنسق
+        ];
+    });
+
+    return response()->json([
+        'status' => true,
+        'count'  => $formattedReports->count(),
+        'data'   => $formattedReports
+    ]);
+    }
+
+
+    // approve زرار ال لتاكيد ان التصننيف صحح
+    public function approveReport(Request $request, $id)
+    {
+    $report = Report::find($id);
+
+    if (!$report) {
+        return response()->json([
+            'status' => false,
+            'message' => 'البلاغ غير موجود.'
+        ], 404);
+    }
+
+    // [تحديث بناءً على منطق الحالات الخاص بكِ]:
+    // تحويل الحالة لـ Pending في الداتابيز (عشان تظهر New في الـ UI عند السوبرفايزر)
+    // وتفعيل الـ sorted عشان ميرجعش لقايمة الفرز
+    $report->update([
+        'current_status' => 'Pending', 
+        'sorted' => true,
+        'admin_id' => auth()->id(), 
+    ]);
+
+    return response()->json([
+        'status' => true,
+        'message' => 'تمت الموافقة على البلاغ بنجاح، وتحويله للمشرف المختص',
+        'data' => [
+            'db_id' => $report->report_id,
+            'db_status' => 'Pending',
+            'ui_status' => 'New'      // الحالة اللي هتظهر في الاسكرينات
+        ]
+    ]);
+    }
+
+
 }
